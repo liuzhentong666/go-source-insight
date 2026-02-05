@@ -194,8 +194,8 @@ func InitCode(ctx context.Context) client.Client {
 	fields := []*entity.Field{
 		entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true).WithIsAutoID(true),
 		entity.NewField().WithName("source").WithDataType(entity.FieldTypeVarChar).WithMaxLength(500),
-		entity.NewField().WithName("content").WithDataType(entity.FieldTypeVarChar).WithMaxLength(2000),
-		entity.NewField().WithName("vector").WithDataType(entity.FieldTypeFloatVector).WithDim(768),
+		entity.NewField().WithName("content").WithDataType(entity.FieldTypeVarChar).WithMaxLength(10000),
+		entity.NewField().WithName("vector").WithDataType(entity.FieldTypeFloatVector).WithDim(1024),
 	}
 	schema := &entity.Schema{
 		CollectionName: "code_segments",
@@ -215,14 +215,14 @@ func InitCode(ctx context.Context) client.Client {
 func InsertCodeChunks(ctx context.Context, m client.Client, sources []string, contents []string, vectors [][]float32) error {
 	sourcesCol := entity.NewColumnVarChar("source", sources)
 	contentsCol := entity.NewColumnVarChar("content", contents)
-	vectorsCol := entity.NewColumnFloatVector("vector", 768, vectors)
+	vectorsCol := entity.NewColumnFloatVector("vector", 1024, vectors)
 	_, err := m.Insert(ctx, "code_segments", "", sourcesCol, vectorsCol, contentsCol)
 	if err != nil {
 		return fmt.Errorf("插入数据失败: %v", err)
 	}
 	err = m.Flush(ctx, "code_segments", false)
 	if err != nil {
-		fmt.Println("Flush 失败:", err)
+		return fmt.Errorf("Flush 失败: %v", err)
 	}
 	return nil
 }

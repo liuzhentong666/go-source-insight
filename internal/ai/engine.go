@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/milvus-io/milvus-sdk-go/v2/client"
 	"github.com/milvus-io/milvus-sdk-go/v2/entity"
@@ -26,81 +27,160 @@ func NewEngine(mc client.Client, e embeddings.Embedder, chat llms.Model) *Source
 		ChatModel:    chat,
 	}
 }
+
 func (e *SourceInsightEngine) Ask(ctx context.Context, question string, fileName string) {
-	// 1. 【核心修复】：将路径统一转为 Linux 风格的正斜杠 (ToSlash)
-	// 这样无论用户传 \ 还是 /，我们都统一处理
+	// 1. 【路径标准化】：解决 Windows 斜杠问题
 	cleanFileName := filepath.ToSlash(fileName)
 
+	// 2. 【RAG 检索】：从 Milvus 找相关代码
 	queryVec, err := e.Embedder.EmbedQuery(ctx, question)
 	if err != nil {
 		log.Printf("向量化失败: %v", err)
 		return
 	}
 
-	// 2. 【核心修复】：精确控制过滤条件
+	searchParam, _ := entity.NewIndexHNSWSearchParam(64)
 	var filterExpr string
 	if cleanFileName != "" {
 		filterExpr = fmt.Sprintf("source == '%s'", cleanFileName)
 	}
-	// 注意：如果 cleanFileName 是空的，filterExpr 保持为空，后面 Search 就不传它了
 
-	searchParam, _ := entity.NewIndexHNSWSearchParam(64)
-
-	// 3. 执行搜索
-	res, err := e.MilvusClient.Search(
-		ctx,
-		"code_segments",
-		[]string{},
-		filterExpr, // 这里的表达式现在很干净
-		[]string{"content", "source"},
-		[]entity.Vector{entity.FloatVector(queryVec)},
-		"vector",
-		entity.COSINE,
-		5,
-		searchParam,
-	)
+	res, err := e.MilvusClient.Search(ctx, "code_segments", []string{}, filterExpr,
+		[]string{"content", "source"}, []entity.Vector{entity.FloatVector(queryVec)},
+		"vector", entity.COSINE, 3, searchParam)
 
 	if err != nil {
-		log.Printf("检索失败: %v", err)
+		log.Printf("Milvus 搜索失败: %v", err)
 		return
 	}
-	// 4. 解析结果
+
+	// 3. 【解析 RAG 结果】
 	var builder strings.Builder
 	if len(res) > 0 && res[0].IDs.Len() > 0 {
 		sr := res[0]
-		// 打印一下，方便我们调试
-		fmt.Printf("成功检索到 %d 条代码片段\n", sr.IDs.Len())
-
-		colContent := sr.Fields.GetColumn("content")
 		for i := 0; i < sr.IDs.Len(); i++ {
-			c, _ := colContent.Get(i)
-			builder.WriteString(fmt.Sprintf("\n片段 %d:\n%s\n", i+1, c))
+			c, _ := sr.Fields.GetColumn("content").Get(i)
+			builder.WriteString(fmt.Sprintf("\n代码片段 %d:\n%s\n", i+1, c))
+		}
+	}
+	relevantCode := builder.String()
+
+	// 4. 【逻辑降噪】：如果是问时间，不传代码干扰 AI
+	var finalPrompt string
+	if strings.Contains(question, "时间") || strings.Contains(question, "几点") {
+		finalPrompt = question
+	} else {
+		finalPrompt = fmt.Sprintf("参考代码：\n%s\n问题：%s", relevantCode, question)
+	}
+
+	// 5. 【构造 System Prompt】：下达死命令
+	cleanSystemPrompt := `你是一个代码助手。  
+【工具调用法律】：  
+1. 查时间必须调用 get_current_time。  
+2. 找文件必须调用 search_file。  
+3. 如果你要调用工具，请直接发送 JSON 信号。如果你无法发送信号，请在回复中包含 {"tool_call": "工具名", "arguments": {...}} 格式。`
+
+	// 6. 【组装消息流】：System -> History -> Human
+	var messages []llms.MessageContent
+	messages = append(messages, llms.TextParts(llms.ChatMessageTypeSystem, cleanSystemPrompt))
+	messages = append(messages, e.History...)
+	messages = append(messages, llms.TextParts(llms.ChatMessageTypeHuman, finalPrompt))
+
+	// 7. 【第一次呼叫 AI】：开启工具箱
+	resp, err := e.ChatModel.GenerateContent(ctx, messages, llms.WithTools(TotalTools))
+	if err != nil {
+		log.Printf("AI 请求失败: %v", err)
+		return
+	}
+
+	// 检查响应是否有选择项
+	if len(resp.Choices) == 0 {
+		log.Printf("AI 响应中没有选择项")
+		return
+	}
+
+	choice := resp.Choices[0]
+	var toolExecuted bool
+	var toolResult string
+
+	// 8. 【双模拦截逻辑】
+	// 模式 A：正式信号 (ToolCalls > 0)
+	if len(choice.ToolCalls) > 0 {
+		fmt.Println("✅ 检测到正式 ToolCall 信号...")
+		toolCall := choice.ToolCalls[0]
+		if fn, ok := ToolFunctions[toolCall.FunctionCall.Name]; ok {
+			toolResult = fn(toolCall.FunctionCall.Arguments)
+			toolExecuted = true
+			// 反馈给 AI 的正式格式
+			messages = append(messages, llms.TextParts(llms.ChatMessageTypeAI, choice.Content))
+			messages = append(messages, llms.MessageContent{
+				Role: llms.ChatMessageTypeTool,
+				Parts: []llms.ContentPart{llms.ToolCallResponse{
+					ToolCallID: toolCall.ID,
+					Name:       toolCall.FunctionCall.Name,
+					Content:    toolResult,
+				}},
+			})
+		}
+	} else if strings.Contains(choice.Content, "{") {
+		// 模式 B：手动拦截 (AI 乱打字)
+		fmt.Println("📢 检测到文字中的 JSON 指令，开始智能调度...")
+		aiSay := choice.Content
+		start := strings.Index(aiSay, "{")
+		end := strings.LastIndex(aiSay, "}")
+
+		if start != -1 && end != -1 && end > start {
+			jsonStr := aiSay[start : end+1]
+
+			// 提取 AI 乱起的工具名
+			var temp struct {
+				ToolCall string `json:"tool_call"`
+			}
+			json.Unmarshal([]byte(jsonStr), &temp)
+			tName := strings.ToLower(temp.ToolCall)
+
+			// 模糊匹配分发
+			if strings.Contains(tName, "time") {
+				toolResult = WrappedTimeFunc(jsonStr)
+				toolExecuted = true
+			} else if strings.Contains(tName, "search") || strings.Contains(tName, "code") || strings.Contains(tName, "file") {
+				toolResult = WrappedSearchFunc(jsonStr)
+				toolExecuted = true
+			}
+
+			if toolExecuted {
+				fmt.Printf("🛠️ 手动分发成功，执行结果: %s\n", toolResult)
+				// 二次闭环需要的消息
+				messages = append(messages, llms.TextParts(llms.ChatMessageTypeAI, aiSay))
+				messages = append(messages, llms.TextParts(llms.ChatMessageTypeHuman, "系统反馈工具结果: "+toolResult))
+			}
 		}
 	}
 
-	relevantCode := builder.String()
-	if relevantCode == "" {
-		fmt.Println("AI 提示：在代码库中未找到相关逻辑。")
-		// 调试小贴士：如果到这里还是空的，说明数据库里存的路径格式有问题
-		return
+	// 9. 【二次反馈】：如果动用了工具，让 AI 重新组织语言
+	if toolExecuted {
+		resp, err = e.ChatModel.GenerateContent(ctx, messages)
+		if err != nil {
+			log.Printf("AI 二次请求失败: %v", err)
+			return
+		}
+		// 再次检查响应是否有选择项
+		if len(resp.Choices) == 0 {
+			log.Printf("AI 二次响应中没有选择项")
+			return
+		}
 	}
 
-	// 5. 问 AI (保持不变)
-	finalPrompt := fmt.Sprintf(`请参考代码回答问题：\n%s\n问题：%s`, relevantCode, question)
-	resp, _ := e.ChatModel.GenerateContent(ctx, []llms.MessageContent{
-		llms.TextParts(llms.ChatMessageTypeHuman, finalPrompt),
-	})
-	messages := append(e.History, llms.TextParts(llms.ChatMessageTypeHuman, finalPrompt))
-	resp, err = e.ChatModel.GenerateContent(ctx, messages)
-	if err != nil {
-		log.Printf("AI 生成失败: %v", err)
-		return
-	}
+	// 10. 【存入记忆】：只存人类问题和最终的 AI 回答
 	e.History = append(e.History, llms.TextParts(llms.ChatMessageTypeHuman, question))
-	e.History = append(e.History, llms.TextParts(llms.ChatMessageTypeHuman, resp.Choices[0].Content))
-	if len(e.History) >= 9 {
+	e.History = append(e.History, llms.TextParts(llms.ChatMessageTypeAI, resp.Choices[0].Content))
+
+	// 保持记忆不要太长 (只存最近 3 轮对话)
+	if len(e.History) > 6 {
 		e.History = e.History[2:]
 	}
+
+	// 11. 【最终输出】
 	fmt.Println("\n🔍 分析报告：")
 	fmt.Println(resp.Choices[0].Content)
 }

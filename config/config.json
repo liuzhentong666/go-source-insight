@@ -1,0 +1,7 @@
+{
+  "default_output": "stdout",
+  "default_format": "text",
+  "verbose": false,
+  "ollama_endpoint": "http://localhost:11434",
+  "milvus_endpoint": "http://localhost:19530"
+}
