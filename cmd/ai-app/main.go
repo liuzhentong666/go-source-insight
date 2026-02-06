@@ -9,6 +9,7 @@ import (
 	"github.com/tmc/langchaingo/llms/ollama"
 	"go-ai-study/internal/ai"
 	"log"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -54,8 +55,12 @@ func main() {
 	fmt.Println("现在，你可以开始问关于这个项目代码的问题了！")
 	//question := "请分析这个项目ScanCode的具体实现逻辑"
 	//fmt.Printf("\n用户提问: %s\n", question)
-	//ai.Consult(ctx, mc, e, chatLLM, question, "F:/go-ai-study/internal/ai/scanner.go")
-	insightEngine := ai.NewEngine(mc, e, chatLLM)
+	//ai.Consult(ctx, mc, e, chatLLM, question, "F:/go-ai-study/internal/ai/scanner.go", logger)
+
+	// 创建 logger（使用默认 info 级别，text 格式）
+	logger := ai.NewLogger(slog.LevelInfo)
+
+	insightEngine := ai.NewEngine(mc, e, chatLLM, logger)
 	terminalScanner := bufio.NewScanner(os.Stdin)
 	fmt.Println("\n-------------------------------------------")
 	fmt.Println("💡 进入交互模式。请输入你的问题（输入 'exit' 退出程序）")

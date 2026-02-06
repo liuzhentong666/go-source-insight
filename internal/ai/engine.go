@@ -18,13 +18,15 @@ type SourceInsightEngine struct {
 	Embedder     embeddings.Embedder
 	ChatModel    llms.Model
 	History      []llms.MessageContent
+	logger       *Logger
 }
 
-func NewEngine(mc client.Client, e embeddings.Embedder, chat llms.Model) *SourceInsightEngine {
+func NewEngine(mc client.Client, e embeddings.Embedder, chat llms.Model, logger *Logger) *SourceInsightEngine {
 	return &SourceInsightEngine{
 		MilvusClient: mc,
 		Embedder:     e,
 		ChatModel:    chat,
+		logger:       logger,
 	}
 }
 
@@ -35,7 +37,7 @@ func (e *SourceInsightEngine) Ask(ctx context.Context, question string, fileName
 	// 2. 【RAG 检索】：从 Milvus 找相关代码
 	queryVec, err := e.Embedder.EmbedQuery(ctx, question)
 	if err != nil {
-		log.Printf("向量化失败: %v", err)
+		e.logger.Error("向量化失败", "error", err)
 		return
 	}
 
@@ -50,7 +52,7 @@ func (e *SourceInsightEngine) Ask(ctx context.Context, question string, fileName
 		"vector", entity.COSINE, 3, searchParam)
 
 	if err != nil {
-		log.Printf("Milvus 搜索失败: %v", err)
+		e.logger.Error("Milvus 搜索失败", "error", err)
 		return
 	}
 
@@ -89,13 +91,13 @@ func (e *SourceInsightEngine) Ask(ctx context.Context, question string, fileName
 	// 7. 【第一次呼叫 AI】：开启工具箱
 	resp, err := e.ChatModel.GenerateContent(ctx, messages, llms.WithTools(TotalTools))
 	if err != nil {
-		log.Printf("AI 请求失败: %v", err)
+		e.logger.Error("AI 请求失败", "error", err)
 		return
 	}
 
 	// 检查响应是否有选择项
 	if len(resp.Choices) == 0 {
-		log.Printf("AI 响应中没有选择项")
+		e.logger.Error("AI 响应中没有选择项")
 		return
 	}
 
@@ -106,7 +108,7 @@ func (e *SourceInsightEngine) Ask(ctx context.Context, question string, fileName
 	// 8. 【双模拦截逻辑】
 	// 模式 A：正式信号 (ToolCalls > 0)
 	if len(choice.ToolCalls) > 0 {
-		fmt.Println("✅ 检测到正式 ToolCall 信号...")
+		e.logger.Info("检测到正式 ToolCall 信号")
 		toolCall := choice.ToolCalls[0]
 		if fn, ok := ToolFunctions[toolCall.FunctionCall.Name]; ok {
 			toolResult = fn(toolCall.FunctionCall.Arguments)
@@ -124,7 +126,7 @@ func (e *SourceInsightEngine) Ask(ctx context.Context, question string, fileName
 		}
 	} else if strings.Contains(choice.Content, "{") {
 		// 模式 B：手动拦截 (AI 乱打字)
-		fmt.Println("📢 检测到文字中的 JSON 指令，开始智能调度...")
+		e.logger.Info("检测到文字中的 JSON 指令，开始智能调度")
 		aiSay := choice.Content
 		start := strings.Index(aiSay, "{")
 		end := strings.LastIndex(aiSay, "}")
@@ -149,7 +151,7 @@ func (e *SourceInsightEngine) Ask(ctx context.Context, question string, fileName
 			}
 
 			if toolExecuted {
-				fmt.Printf("🛠️ 手动分发成功，执行结果: %s\n", toolResult)
+				e.logger.Info("手动分发成功", "result", toolResult)
 				// 二次闭环需要的消息
 				messages = append(messages, llms.TextParts(llms.ChatMessageTypeAI, aiSay))
 				messages = append(messages, llms.TextParts(llms.ChatMessageTypeHuman, "系统反馈工具结果: "+toolResult))
@@ -161,12 +163,12 @@ func (e *SourceInsightEngine) Ask(ctx context.Context, question string, fileName
 	if toolExecuted {
 		resp, err = e.ChatModel.GenerateContent(ctx, messages)
 		if err != nil {
-			log.Printf("AI 二次请求失败: %v", err)
+			e.logger.Error("AI 二次请求失败", "error", err)
 			return
 		}
 		// 再次检查响应是否有选择项
 		if len(resp.Choices) == 0 {
-			log.Printf("AI 二次响应中没有选择项")
+			e.logger.Error("AI 二次响应中没有选择项")
 			return
 		}
 	}

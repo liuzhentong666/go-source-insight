@@ -100,6 +100,11 @@ func (tm *ToolManager) Get(name string) (Tool, ToolConfig, error) {
 	return tool, config, nil
 }
 
+// GetLogger 获取日志记录器
+func (tm *ToolManager) GetLogger() Logger {
+	return tm.logger
+}
+
 // List 列出所有工具
 func (tm *ToolManager) List() []string {
 	tm.mu.RLock()

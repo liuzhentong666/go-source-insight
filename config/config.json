@@ -3,5 +3,11 @@
   "default_format": "text",
   "verbose": false,
   "ollama_endpoint": "http://localhost:11434",
-  "milvus_endpoint": "http://localhost:19530"
+  "milvus_endpoint": "http://localhost:19530",
+  "log_config": {
+    "level": "info",
+    "format": "text",
+    "output": "stdout",
+    "file_path": ""
+  }
 }

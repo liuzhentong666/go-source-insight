@@ -332,11 +332,17 @@ go-ai-insight - Go 代码分析和测试工具
   list        列出所有可用工具
 
 全局选项:
-  -c, --config <file>   配置文件路径
-  -f, --format <format> 输出格式 (json|text)
-  -o, --output <file>   输出文件路径
-  -v, --verbose         详细输出
-  --version             显示版本信息
+  -c, --config <file>       配置文件路径
+  -f, --format <format>     输出格式 (json|text)
+  -o, --output <file>       输出文件路径
+  -v, --verbose             详细输出
+  --version                 显示版本信息
+
+日志选项:
+  --log-level <level>       日志级别 (debug|info|warn|error)
+  --log-format <format>     日志格式 (text|json)
+  --log-output <output>     日志输出 (stdout|stderr|file)
+  --log-file <path>         日志文件路径 (当 log-output=file 时使用)
 ```
 
 ### 3. 列出所有工具
@@ -690,6 +696,49 @@ done
 ```bash
 # 生成 JSON 报告
 ./go-ai-insight complexity internal/tools/test_generator.go -f json > report.json
+```
+
+### 示例 6：日志配置
+
+```bash
+# 使用 JSON 格式日志
+./go-ai-insight --log-format json list
+
+# 使用 debug 级别日志
+./go-ai-insight --log-level debug analyze internal/tools/test_generator.go
+
+# 输出日志到文件
+./go-ai-insight --log-output file --log-file /var/log/insight.log security internal/tools/
+
+# 组合使用
+./go-ai-insight --log-format json --log-level debug --log-file debug.json bug internal/tools/
+```
+
+### 示例 7：生产环境配置
+
+创建生产环境配置文件 `~/.go-ai-insight/config.json`：
+
+```json
+{
+  "default_output": "stdout",
+  "default_format": "json",
+  "verbose": false,
+  "ollama_endpoint": "http://localhost:11434",
+  "milvus_endpoint": "http://localhost:19530",
+  "log_config": {
+    "level": "info",
+    "format": "json",
+    "output": "file",
+    "file_path": "/var/log/go-ai-insight/app.log"
+  }
+}
+```
+
+使用配置文件运行：
+
+```bash
+./go-ai-insight analyze internal/tools/
+```
 
 # 查看报告
 cat report.json
@@ -725,6 +774,18 @@ cat report.json
 | `verbose` | bool | false | 详细输出 |
 | `ollama_endpoint` | string | "http://localhost:11434" | Ollama 服务地址 |
 | `milvus_endpoint` | string | "http://localhost:19530" | Milvus 服务地址 |
+| `log_config` | object | 见下方 | 日志配置 |
+
+### 日志配置
+
+`log_config` 对象包含以下字段：
+
+| 字段 | 类型 | 默认值 | 可选值 | 说明 |
+|------|------|--------|--------|------|
+| `level` | string | "info" | debug, info, warn, error | 日志级别 |
+| `format` | string | "text" | text, json | 日志格式 |
+| `output` | string | "stdout" | stdout, stderr, file | 日志输出目标 |
+| `file_path` | string | "" | - | 日志文件路径（output=file 时必填）|
 
 ### 配置文件示例
 
@@ -734,8 +795,51 @@ cat report.json
   "default_format": "text",
   "verbose": false,
   "ollama_endpoint": "http://localhost:11434",
-  "milvus_endpoint": "http://localhost:19530"
+  "milvus_endpoint": "http://localhost:19530",
+  "log_config": {
+    "level": "info",
+    "format": "text",
+    "output": "stdout",
+    "file_path": ""
+  }
 }
+```
+
+### 日志级别说明
+
+| 级别 | 数值 | 说明 | 使用场景 |
+|------|------|------|----------|
+| debug | -4 | 最详细的日志 | 开发调试 |
+| info | 0 | 常规信息 | 正常运行 |
+| warn | 4 | 警告信息 | 潜在问题 |
+| error | 8 | 错误信息 | 发生错误 |
+
+### 日志格式
+
+#### Text 格式（默认）
+
+**特点**:
+- 人类可读
+- 简洁直观
+- 适合终端输出
+
+**示例**:
+```
+time=2026-02-06T23:09:24.277+08:00 level=INFO msg=工具注册成功 tool=test_generator enabled=true
+time=2026-02-06T23:09:24.278+08:00 level=INFO msg=工具注册成功 tool=complexity_analyzer enabled=true
+```
+
+#### JSON 格式
+
+**特点**:
+- 机器可读
+- 结构化数据
+- 适合日志分析工具
+
+**示例**:
+```json
+{"time":"2026-02-06T23:09:26.94069409+08:00","level":"INFO","msg":"工具注册成功","tool":"test_generator","enabled":true}
+{"time":"2026-02-06T23:09:26.941612581+08:00","level":"INFO","msg":"工具注册成功","tool":"complexity_analyzer","enabled":true}
 ```
 
 ### 环境变量
@@ -744,6 +848,10 @@ cat report.json
 |--------|------|
 | `GO_AI_INSIGHT_VERBOSE` | 详细输出开关 |
 | `GO_AI_INSIGHT_FORMAT` | 默认输出格式 |
+| `GO_AI_INSIGHT_LOG_LEVEL` | 日志级别 |
+| `GO_AI_INSIGHT_LOG_FORMAT` | 日志格式 |
+| `GO_AI_INSIGHT_LOG_OUTPUT` | 日志输出 |
+| `GO_AI_INSIGHT_LOG_FILE` | 日志文件路径 |
 
 ### 配置优先级
 
@@ -855,6 +963,77 @@ go test ./internal/tools/ -v
 
 # 运行特定测试
 go test ./internal/tools/ -run TestComplexity -v
+```
+
+### 日志最佳实践
+
+#### 开发环境
+
+使用 debug 级别，输出详细日志：
+
+```bash
+./go-ai-insight --log-level debug --log-format text analyze internal/tools/
+```
+
+#### 测试环境
+
+使用 text 格式，输出到标准错误：
+
+```json
+{
+  "log_config": {
+    "level": "debug",
+    "format": "text",
+    "output": "stderr",
+    "file_path": ""
+  }
+}
+```
+
+#### 生产环境
+
+使用 info 级别，JSON 格式，输出到文件：
+
+```json
+{
+  "log_config": {
+    "level": "info",
+    "format": "json",
+    "output": "file",
+    "file_path": "/var/log/go-ai-insight/app.log"
+  }
+}
+```
+
+#### 日志轮转
+
+对于生产环境，建议使用 `logrotate` 管理日志文件：
+
+```
+/var/log/go-ai-insight/*.log {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 www-data adm
+}
+```
+
+#### 日志分析
+
+使用 JSON 格式日志配合日志分析工具：
+
+```bash
+# 提取错误日志
+grep '"level":"ERROR"' /var/log/go-ai-insight/app.log
+
+# 统计错误数量
+grep -c '"level":"ERROR"' /var/log/go-ai-insight/app.log
+
+# 使用 jq 提取字段
+jq 'select(.level=="ERROR") | .msg' /var/log/go-ai-insight/app.log
 ```
 
 ---

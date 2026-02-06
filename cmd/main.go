@@ -18,6 +18,12 @@ func main() {
 	verbose := flag.Bool("v", false, "详细输出")
 	showVersion := flag.Bool("version", false, "显示版本信息")
 
+	// 日志配置参数
+	logLevel := flag.String("log-level", "", "日志级别 (debug|info|warn|error)")
+	logFormat := flag.String("log-format", "", "日志格式 (text|json)")
+	logOutput := flag.String("log-output", "", "日志输出 (stdout|stderr|file)")
+	logFilePath := flag.String("log-file", "", "日志文件路径 (当 log-output=file 时使用)")
+
 	flag.Parse()
 
 	// 显示版本
@@ -27,7 +33,8 @@ func main() {
 	}
 
 	// 创建 CLI
-	cli, err := cli.NewCLI(*configFile, *outputFormat, *outputFile, *verbose)
+	cli, err := cli.NewCLI(*configFile, *outputFormat, *outputFile, *verbose,
+		*logLevel, *logFormat, *logOutput, *logFilePath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "初始化失败: %v\n", err)
 		os.Exit(1)

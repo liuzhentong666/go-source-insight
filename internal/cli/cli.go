@@ -18,7 +18,8 @@ type CLI struct {
 }
 
 // NewCLI 创建 CLI
-func NewCLI(configPath, format string, outputPath string, verbose bool) (*CLI, error) {
+func NewCLI(configPath, format string, outputPath string, verbose bool,
+	logLevel, logFormat, logOutput, logFilePath string) (*CLI, error) {
 	// 加载配置
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -31,6 +32,20 @@ func NewCLI(configPath, format string, outputPath string, verbose bool) (*CLI, e
 	}
 	if verbose {
 		cfg.Verbose = true
+	}
+
+	// 日志配置：命令行参数优先级 > 配置文件
+	if logLevel != "" {
+		cfg.LogConfig.Level = logLevel
+	}
+	if logFormat != "" {
+		cfg.LogConfig.Format = logFormat
+	}
+	if logOutput != "" {
+		cfg.LogConfig.Output = logOutput
+	}
+	if logFilePath != "" {
+		cfg.LogConfig.FilePath = logFilePath
 	}
 
 	// 创建输出格式化器
@@ -49,7 +64,8 @@ func NewCLI(configPath, format string, outputPath string, verbose bool) (*CLI, e
 	}
 
 	// 创建 ToolManager
-	toolManager := tools.NewToolManager(tools.NewNoopLogger())
+	logger := tools.NewLoggerFactory(&cfg.LogConfig)
+	toolManager := tools.NewToolManager(logger)
 
 	// 注册所有工具
 	registerTools(toolManager)
@@ -68,9 +84,12 @@ func NewCLI(configPath, format string, outputPath string, verbose bool) (*CLI, e
 
 // registerTools 注册所有工具
 func registerTools(tm *tools.ToolManager) {
+	// 获取 ToolManager 的 logger
+	logger := tm.GetLogger()
+
 	// 注册测试生成器
 	tm.Register(
-		tools.NewTestGenerator(tools.NewNoopLogger()),
+		tools.NewTestGenerator(logger),
 		tools.DefaultToolConfig("test_generator"),
 	)
 

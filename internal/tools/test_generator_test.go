@@ -1,61 +1,58 @@
 package tools
 
+import (
+	"testing"
+)
+
 func TestNewTestGenerator(t *testing.T) {
-	type args struct {
-		logger Logger
+	logger := NewNoopLogger()
+	generator := NewTestGenerator(logger)
+
+	if generator == nil {
+		t.Error("NewTestGenerator() returned nil")
 	}
-	tests := []struct {
-		name string
-		args args
-		want *TestGenerator
-	}{
-		{
-			name: "TODO: 测试用例描述",
-			args: args{TODO_logger},
-			want: TODO_ * TestGenerator,
-		},
-		// TODO: 添加更多测试用例
-		// {
-		//     name: "边界值测试",
-		//     args: args{ TODO_logger},
-		//     want: TODO_*TestGenerator,
-		// },
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got != tt.want {
-				t.Errorf("%s() = %v, want %v", got, tt.want)
-			}
-		})
+
+	if generator.Name() != "test_generator" {
+		t.Errorf("Expected name 'test_generator', got '%s'", generator.Name())
 	}
 }
 
-
 func TestValidate(t *testing.T) {
-	type args struct {
-		input any
-	}
+	logger := NewNoopLogger()
+	generator := NewTestGenerator(logger)
+
 	tests := []struct {
-		name string
-		args args
-		want error
+		name    string
+		input   any
+		wantErr bool
 	}{
 		{
-			name: "TODO: 测试用例描述",
-			args: args{TODO_input},
-			want: TODO_error,
+			name:    "valid request with function name",
+			input:   GenerateRequest{FunctionName: "TestFunc"},
+			wantErr: false,
 		},
-		// TODO: 添加更多测试用例
-		// {
-		//     name: "边界值测试",
-		//     args: args{ TODO_input},
-		//     want: TODO_error,
-		// },
+		{
+			name:    "valid request with file path",
+			input:   GenerateRequest{FilePath: "/etc/hosts"},
+			wantErr: false,
+		},
+		{
+			name:    "invalid request - no target",
+			input:   GenerateRequest{},
+			wantErr: true,
+		},
+		{
+			name:    "invalid input type",
+			input:   "string",
+			wantErr: true,
+		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
+			err := generator.Validate(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
