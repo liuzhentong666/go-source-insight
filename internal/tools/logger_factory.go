@@ -14,7 +14,9 @@ type LoggerFactory interface {
 }
 
 // loggerFactory 日志工厂实现
-type loggerFactory struct{}
+type loggerFactory struct {
+	file *os.File // 文件句柄（用于文件输出时关闭）
+}
 
 // NewLoggerFactory 创建日志工厂
 func NewLoggerFactory(cfg *config.LogConfig) Logger {
@@ -42,10 +44,12 @@ func (lf *loggerFactory) CreateLogger(cfg *config.LogConfig) (Logger, error) {
 	case "stderr":
 		handler = createHandler(os.Stderr, cfg.Format, level)
 	case "file":
-		handler, err = createFileHandler(cfg.FilePath, cfg.Format, level)
+		var file *os.File
+		file, handler, err = createFileHandler(cfg.FilePath, cfg.Format, level)
 		if err != nil {
 			return nil, err
 		}
+		lf.file = file
 	default:
 		// 默认输出到 stdout
 		handler = createHandler(os.Stdout, cfg.Format, level)
@@ -55,6 +59,14 @@ func (lf *loggerFactory) CreateLogger(cfg *config.LogConfig) (Logger, error) {
 	return &DefaultLogger{
 		logger: slog.New(handler),
 	}, nil
+}
+
+// Close 关闭文件句柄（如果有）
+func (lf *loggerFactory) Close() error {
+	if lf.file != nil {
+		return lf.file.Close()
+	}
+	return nil
 }
 
 // parseLogLevel 解析日志级别字符串
@@ -91,14 +103,14 @@ func createHandler(writer *os.File, format string, level slog.Level) slog.Handle
 }
 
 // createFileHandler 创建文件输出 handler
-func createFileHandler(filePath, format string, level slog.Level) (slog.Handler, error) {
+func createFileHandler(filePath, format string, level slog.Level) (*os.File, slog.Handler, error) {
 	// 打开文件（追加模式，不存在则创建）
 	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return createHandler(file, format, level), nil
+	return file, createHandler(file, format, level), nil
 }
 
 // LogLevel 从字符串解析日志级别（用于命令行参数）

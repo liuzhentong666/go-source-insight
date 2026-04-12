@@ -33,7 +33,7 @@ func TestValidate(t *testing.T) {
 		},
 		{
 			name:    "valid request with file path",
-			input:   GenerateRequest{FilePath: "/etc/hosts"},
+			input:   GenerateRequest{FilePath: "test_generator.go"},
 			wantErr: false,
 		},
 		{
@@ -57,5 +57,3 @@ func TestValidate(t *testing.T) {
 		})
 	}
 }
-
-

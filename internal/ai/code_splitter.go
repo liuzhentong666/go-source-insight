@@ -1,20 +1,23 @@
 package ai
 
 import (
-	"github.com/tmc/langchaingo/schema"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"strings"
+
+	"github.com/tmc/langchaingo/schema"
 )
 
 // CodeSplitter 智能代码分块器
+// 用于将Go源代码按照函数、结构体等逻辑单元进行智能分割
 type CodeSplitter struct {
 	MaxLines int // 单个块最大行数
 	MinLines int // 单个块最小行数
 }
 
 // NewCodeSplitter 创建新的分块器
+// 返回一个具有默认配置的分块器实例
 func NewCodeSplitter() *CodeSplitter {
 	return &CodeSplitter{
 		MaxLines: 100, // 最大100行
@@ -23,6 +26,7 @@ func NewCodeSplitter() *CodeSplitter {
 }
 
 // SplitDocuments 按 Go 函数/结构分块
+// 将输入的文档切片按照Go语言的语法结构进行智能分割
 func (cs *CodeSplitter) SplitDocuments(docs []schema.Document) ([]schema.Document, error) {
 	var chunks []schema.Document
 
@@ -47,6 +51,11 @@ func (cs *CodeSplitter) SplitDocuments(docs []schema.Document) ([]schema.Documen
 				start := fset.Position(fnDecl.Pos()).Line - 1
 				end := fset.Position(fnDecl.End()).Line - 1
 
+				// 边界检查
+				if start < 0 || end >= len(lines) || start > end {
+					return true
+				}
+
 				// 检查函数大小
 				if end-start+1 <= cs.MaxLines {
 					// 函数不大，直接作为一个块
@@ -68,21 +77,23 @@ func (cs *CodeSplitter) SplitDocuments(docs []schema.Document) ([]schema.Documen
 }
 
 // addContext 添加注释和上下文
+// 向前查找关联的注释，向后查找可能的相邻代码
 func (cs *CodeSplitter) addContext(lines []string, start, end int, metadata map[string]any) string {
 	// 往前查找注释
 	contextStart := start
 	for i := start - 1; i >= 0; i-- {
-		if strings.TrimSpace(lines[i]) == "" {
+		trimmedLine := strings.TrimSpace(lines[i])
+		if trimmedLine == "" {
 			continue
 		}
-		if strings.HasPrefix(strings.TrimSpace(lines[i]), "//") {
+		if strings.HasPrefix(trimmedLine, "//") {
 			contextStart = i
 		} else {
 			break
 		}
 	}
 
-	// 往后查找相邻函数
+	// 往后查找相邻函数（仅对较小函数处理）
 	contextEnd := end
 	if end+1 < len(lines) && end-start < 50 {
 		// 如果函数较小，可能包含相邻的小函数
@@ -93,10 +104,22 @@ func (cs *CodeSplitter) addContext(lines []string, start, end int, metadata map[
 		}
 	}
 
+	// 边界保护
+	if contextStart < 0 {
+		contextStart = 0
+	}
+	if contextEnd >= len(lines) {
+		contextEnd = len(lines) - 1
+	}
+	if contextStart > contextEnd {
+		return ""
+	}
+
 	return strings.Join(lines[contextStart:contextEnd+1], "\n")
 }
 
 // splitLargeFunction 分割大函数
+// 按照逻辑分割点将大函数拆分为多个较小的块
 func (cs *CodeSplitter) splitLargeFunction(lines []string, start, end int, metadata map[string]any) []schema.Document {
 	var chunks []schema.Document
 	currentStart := start
@@ -117,11 +140,9 @@ func (cs *CodeSplitter) splitLargeFunction(lines []string, start, end int, metad
 		// 遇到代码，检查是否应该分割
 		if line != "" {
 			// 检查是否达到最大行数或逻辑分割点
-			if i-currentStart >= cs.MaxLines ||
-				cs.isLogicalSplitPoint(line) {
+			if i-currentStart >= cs.MaxLines || cs.isLogicalSplitPoint(line) {
 				// 创建一个块
-				code := commentBuffer +
-					strings.Join(lines[currentStart:i+1], "\n")
+				code := commentBuffer + strings.Join(lines[currentStart:i+1], "\n")
 				chunks = append(chunks, schema.Document{
 					PageContent: code,
 					Metadata:    metadata,
@@ -135,8 +156,7 @@ func (cs *CodeSplitter) splitLargeFunction(lines []string, start, end int, metad
 
 	// 添加最后一块
 	if currentStart <= end {
-		code := commentBuffer + strings.Join(lines[currentStart:end+1],
-			"\n")
+		code := commentBuffer + strings.Join(lines[currentStart:end+1], "\n")
 		chunks = append(chunks, schema.Document{
 			PageContent: code,
 			Metadata:    metadata,
@@ -147,6 +167,7 @@ func (cs *CodeSplitter) splitLargeFunction(lines []string, start, end int, metad
 }
 
 // isLogicalSplitPoint 判断是否是逻辑分割点
+// 根据关键字识别代码中的逻辑分割点
 func (cs *CodeSplitter) isLogicalSplitPoint(line string) bool {
 	logicalKeywords := []string{
 		"if ", "for ", "switch ", "case ",
@@ -163,6 +184,7 @@ func (cs *CodeSplitter) isLogicalSplitPoint(line string) bool {
 }
 
 // simpleSplitByLines 简单的行分割（用于非Go代码）
+// 按照固定行数分割非Go代码或解析失败的内容
 func (cs *CodeSplitter) simpleSplitByLines(doc schema.Document) []schema.Document {
 	var chunks []schema.Document
 	lines := strings.Split(doc.PageContent, "\n")

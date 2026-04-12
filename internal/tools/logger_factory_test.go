@@ -100,7 +100,7 @@ func TestLoggerFactory_FileOutput(t *testing.T) {
 	tmpDir := t.TempDir()
 	logFile := filepath.Join(tmpDir, "test.log")
 
-	config := &config.LogConfig{
+	cfg := &config.LogConfig{
 		Level:    "info",
 		Format:   "text",
 		Output:   "file",
@@ -108,16 +108,20 @@ func TestLoggerFactory_FileOutput(t *testing.T) {
 	}
 
 	factory := &loggerFactory{}
-	logger, err := factory.CreateLogger(config)
+	logger, err := factory.CreateLogger(cfg)
 	if err != nil {
 		t.Fatalf("CreateLogger() error = %v", err)
 	}
+	defer factory.Close() // 确保文件关闭
 
 	if logger == nil {
 		t.Fatal("CreateLogger() returned nil logger")
 	}
 
 	logger.Info("test message", "key", "value")
+
+	// 关闭文件以便检查
+	factory.Close()
 
 	if _, err := os.Stat(logFile); os.IsNotExist(err) {
 		t.Error("log file does not exist")
@@ -150,10 +154,10 @@ func TestParseLogLevel(t *testing.T) {
 
 func TestLogLevel(t *testing.T) {
 	tests := []struct {
-		name    string
+		name     string
 		levelStr string
-		want    slog.Level
-		wantErr bool
+		want     slog.Level
+		wantErr  bool
 	}{
 		{"debug string", "debug", slog.LevelDebug, false},
 		{"info string", "info", slog.LevelInfo, false},
