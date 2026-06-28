@@ -50,12 +50,12 @@ func (c *ComplexityCommand) Run(ctx context.Context, args []string, formatter ou
 		return fmt.Errorf("复杂度分析失败: %w", err)
 	}
 
-	// 输出结果
-	if complexityResult != nil && complexityResult.Success {
-		fmt.Println(formatter.Format(complexityResult.Result))
-	} else {
-		fmt.Println("[ERROR] 分析失败")
+	if !complexityResult.Success {
+		return fmt.Errorf("复杂度分析失败: %s", complexityResult.Error)
 	}
+
+	// 输出结果
+	fmt.Println(formatter.Format(complexityResult.Result))
 
 	return nil
 }

@@ -2,10 +2,10 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"go-ai-study/internal/cli/output"
 	"go-ai-study/internal/tools"
-	"os"
 )
 
 // AnalyzeCommand 分析命令
@@ -27,7 +27,7 @@ func (c *AnalyzeCommand) Name() string {
 
 // Description 命令描述
 func (c *AnalyzeCommand) Description() string {
-	return "分析代码并提供智能建议"
+	return "对 Go 文件或目录执行静态规则分析"
 }
 
 // Run 执行命令
@@ -36,26 +36,16 @@ func (c *AnalyzeCommand) Run(ctx context.Context, args []string, formatter outpu
 		return fmt.Errorf("需要指定路径或文件")
 	}
 
-	target := args[0]
-
-	// 读取文件内容
-	content, err := os.ReadFile(target)
+	result, err := analyzeTarget(ctx, c.toolManager, args[0])
 	if err != nil {
-		return fmt.Errorf("读取文件失败: %w", err)
+		return fmt.Errorf("静态分析失败: %w", err)
 	}
 
-	// 执行分析
-	// 这里可以调用多个工具进行分析
-	// 例如：复杂度分析 + 安全扫描 + Bug 检测
-
-	// 执行复杂度分析
-	complexityResult, err := c.toolManager.Run(ctx, "complexity_analyzer", string(content))
+	jsonBytes, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
-		return fmt.Errorf("复杂度分析失败: %w", err)
+		return fmt.Errorf("序列化分析结果失败: %w", err)
 	}
 
-	// 输出结果
-	fmt.Println(formatter.Format(complexityResult.Result))
-
+	fmt.Println(formatter.Format(string(jsonBytes)))
 	return nil
 }

@@ -49,6 +49,9 @@ func (c *SecurityCommand) Run(ctx context.Context, args []string, formatter outp
 	if err != nil {
 		return fmt.Errorf("安全扫描失败: %w", err)
 	}
+	if !securityResult.Success {
+		return fmt.Errorf("安全扫描失败: %s", securityResult.Error)
+	}
 
 	// 输出结果
 	fmt.Println(formatter.Format(securityResult.Result))

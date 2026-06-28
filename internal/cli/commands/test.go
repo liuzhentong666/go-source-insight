@@ -39,8 +39,8 @@ func (c *TestCommand) Run(ctx context.Context, args []string, formatter output.F
 
 	// 判断是文件还是目录
 	req := tools.GenerateRequest{
-		TestMode:    tools.TestModeTableDriven,
-		WithMock:    false,
+		TestMode:     tools.TestModeTableDriven,
+		WithMock:     false,
 		WithCoverage: false,
 	}
 
@@ -58,6 +58,9 @@ func (c *TestCommand) Run(ctx context.Context, args []string, formatter output.F
 	result, err := c.toolManager.Run(ctx, "test_generator", req)
 	if err != nil {
 		return fmt.Errorf("生成测试失败: %w", err)
+	}
+	if !result.Success {
+		return fmt.Errorf("生成测试失败: %s", result.Error)
 	}
 
 	// 输出结果

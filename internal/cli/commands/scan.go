@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"go-ai-study/internal/cli/output"
 )
@@ -21,7 +22,7 @@ func (c *ScanCommand) Name() string {
 
 // Description 命令描述
 func (c *ScanCommand) Description() string {
-	return "扫描代码并存储到向量数据库"
+	return "扫描 Go 项目结构并输出文件统计"
 }
 
 // Run 执行命令
@@ -30,12 +31,17 @@ func (c *ScanCommand) Run(ctx context.Context, args []string, formatter output.F
 		return fmt.Errorf("需要指定路径")
 	}
 
-	target := args[0]
+	result, err := collectGoFiles(args[0])
+	if err != nil {
+		return err
+	}
 
-	// TODO: 实现代码扫描和存储逻辑
-	// 这里需要调用向量数据库和嵌入模型
-	textFormatter := output.NewTextFormatter(output.Options{})
-	fmt.Println(textFormatter.FormatError(fmt.Errorf("扫描功能暂未实现，待后续开发: %s", target)))
+	jsonBytes, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return fmt.Errorf("序列化扫描结果失败: %w", err)
+	}
 
+	fmt.Println(formatter.Format(string(jsonBytes)))
+	_ = ctx
 	return nil
 }

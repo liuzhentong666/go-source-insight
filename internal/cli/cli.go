@@ -11,10 +11,10 @@ import (
 
 // CLI 主 CLI 结构
 type CLI struct {
-	toolManager    *tools.ToolManager
+	toolManager     *tools.ToolManager
 	commandRegistry *commands.CommandRegistry
-	config         *config.Config
-	formatter      output.Formatter
+	config          *config.Config
+	formatter       output.Formatter
 }
 
 // NewCLI 创建 CLI
@@ -75,10 +75,10 @@ func NewCLI(configPath, format string, outputPath string, verbose bool,
 	registerCommands(commandRegistry, toolManager)
 
 	return &CLI{
-		toolManager:    toolManager,
+		toolManager:     toolManager,
 		commandRegistry: commandRegistry,
-		config:         cfg,
-		formatter:      formatter,
+		config:          cfg,
+		formatter:       formatter,
 	}, nil
 }
 
@@ -151,8 +151,8 @@ func (c *CLI) printHelp() error {
 	fmt.Println("  go-ai-insight <command> [options]")
 	fmt.Println("")
 	fmt.Println("命令:")
-	fmt.Println("  scan        扫描代码并存储")
-	fmt.Println("  analyze     分析代码")
+	fmt.Println("  scan        扫描 Go 项目结构并输出文件统计")
+	fmt.Println("  analyze     对 Go 文件或目录执行静态规则分析")
 	fmt.Println("  test        生成测试")
 	fmt.Println("  security    安全扫描")
 	fmt.Println("  bug         Bug 检测")

@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
-	"text/template"
 )
 
 // TestGenerator 测试生成器
@@ -40,18 +39,18 @@ type GenerateRequest struct {
 	DirPath      string // 目录路径（分析整个目录）
 
 	// 配置选项
-	TestMode    TestMode // 测试模式
-	WithMock    bool     // 是否生成 Mock 建议
-	WithCoverage bool    // 是否生成覆盖率报告
+	TestMode     TestMode // 测试模式
+	WithMock     bool     // 是否生成 Mock 建议
+	WithCoverage bool     // 是否生成覆盖率报告
 }
 
 // TestMode 测试模式
 type TestMode string
 
 const (
-	TestModeBasic       TestMode = "basic"         // 基本测试
+	TestModeBasic       TestMode = "basic"        // 基本测试
 	TestModeTableDriven TestMode = "table-driven" // 表驱动测试（推荐）
-	TestModeMock        TestMode = "mock"          // Mock 测试
+	TestModeMock        TestMode = "mock"         // Mock 测试
 )
 
 // Validate 验证输入参数
@@ -150,10 +149,12 @@ func (tg *TestGenerator) generateFunctionTest(req GenerateRequest) (GenerateResu
 		return GenerateResult{}, err
 	}
 
+	fullTestCode := tg.wrapTestFile(funcInfo.Package, testCode)
+
 	// 写入文件
 	testFilePath := tg.getTestFilePath(req.FilePath)
-	if err := os.WriteFile(testFilePath, []byte(testCode), 0644); err != nil {
-		return GenerateResult{}, fmt.Errorf("写入测试文件失败: %w", err)
+	if err := tg.writeNewTestFile(testFilePath, fullTestCode); err != nil {
+		return GenerateResult{}, err
 	}
 
 	// 运行测试并收集覆盖率
@@ -172,7 +173,7 @@ func (tg *TestGenerator) generateFunctionTest(req GenerateRequest) (GenerateResu
 // generateFileTests 为整个文件生成测试
 func (tg *TestGenerator) generateFileTests(req GenerateRequest) (GenerateResult, error) {
 	// 解析文件中的所有函数
-	funcInfos, err := tg.parseFileFunctions(req.FilePath)
+	packageName, funcInfos, err := tg.parseFileFunctions(req.FilePath)
 	if err != nil {
 		return GenerateResult{}, err
 	}
@@ -206,8 +207,9 @@ func (tg *TestGenerator) generateFileTests(req GenerateRequest) (GenerateResult,
 
 	// 写入文件
 	testFilePath := tg.getTestFilePath(req.FilePath)
-	if err := os.WriteFile(testFilePath, []byte(allTestCode.String()), 0644); err != nil {
-		return GenerateResult{}, fmt.Errorf("写入测试文件失败: %w", err)
+	fullTestCode := tg.wrapTestFile(packageName, allTestCode.String())
+	if err := tg.writeNewTestFile(testFilePath, fullTestCode); err != nil {
+		return GenerateResult{}, err
 	}
 
 	// 运行测试并收集覆盖率
@@ -252,8 +254,8 @@ func (tg *TestGenerator) generateDirectoryTests(req GenerateRequest) (GenerateRe
 	for _, filePath := range goFiles {
 		fileReq := GenerateRequest{
 			FilePath:     filePath,
-			TestMode:    req.TestMode,
-			WithMock:    req.WithMock,
+			TestMode:     req.TestMode,
+			WithMock:     req.WithMock,
 			WithCoverage: false, // 目录模式下单独处理覆盖率
 		}
 
@@ -291,13 +293,13 @@ func (tg *TestGenerator) generateDirectoryTests(req GenerateRequest) (GenerateRe
 
 // FunctionInfo 函数信息
 type FunctionInfo struct {
-	Name        string     // 函数名
-	Package     string     // 包名
-	Params      []Parameter // 参数列表
-	Returns     []Parameter // 返回值列表
-	IsMethod    bool       // 是否为方法
-	Receiver    *Parameter // 接收者（如果是方法）
-	DocComment  string     // 文档注释
+	Name       string      // 函数名
+	Package    string      // 包名
+	Params     []Parameter // 参数列表
+	Returns    []Parameter // 返回值列表
+	IsMethod   bool        // 是否为方法
+	Receiver   *Parameter  // 接收者（如果是方法）
+	DocComment string      // 文档注释
 }
 
 // Parameter 参数/返回值信息
@@ -332,11 +334,11 @@ func (tg *TestGenerator) parseFunctionInfo(filePath, funcName string) (*Function
 }
 
 // parseFileFunctions 解析文件中的所有函数
-func (tg *TestGenerator) parseFileFunctions(filePath string) ([]FunctionInfo, error) {
+func (tg *TestGenerator) parseFileFunctions(filePath string) (string, []FunctionInfo, error) {
 	fset := token.NewFileSet()
 	node, err := parser.ParseFile(fset, filePath, nil, parser.ParseComments)
 	if err != nil {
-		return nil, fmt.Errorf("解析文件失败: %w", err)
+		return "", nil, fmt.Errorf("解析文件失败: %w", err)
 	}
 
 	var funcInfos []FunctionInfo
@@ -349,7 +351,7 @@ func (tg *TestGenerator) parseFileFunctions(filePath string) ([]FunctionInfo, er
 		return true
 	})
 
-	return funcInfos, nil
+	return node.Name.Name, funcInfos, nil
 }
 
 // extractFunctionInfo 从 AST 节点提取函数信息
@@ -509,112 +511,14 @@ func (tg *TestGenerator) generateBasicTest(funcInfo FunctionInfo) string {
 `, funcInfo.Name, funcInfo.Name)
 }
 
-// generateTableDrivenTest 生成表驱动测试
+// generateTableDrivenTest 生成可编译的测试骨架。
+// 生成器当前无法可靠推断复杂参数和返回值的合法样例，因此先生成 t.Skip 骨架，
+// 避免把 TODO_ 占位符写入项目导致 go test/go build 失败。
 func (tg *TestGenerator) generateTableDrivenTest(funcInfo FunctionInfo) string {
-	var paramFields strings.Builder
-	var paramNames strings.Builder
-	var paramValues strings.Builder
-
-	// 生成参数结构体和测试数据
-	for i, param := range funcInfo.Params {
-		if param.Name == "" {
-			paramName := fmt.Sprintf("arg%d", i)
-			paramFields.WriteString(fmt.Sprintf("%s %s\n", paramName, param.Type))
-			paramNames.WriteString(paramName + " ")
-			if i > 0 {
-			paramValues.WriteString(", ")
-		}
-		paramValues.WriteString("TODO_" + paramName)
-		} else {
-			paramFields.WriteString(fmt.Sprintf("%s %s\n", param.Name, param.Type))
-			paramNames.WriteString(param.Name + " ")
-			if i > 0 {
-				paramValues.WriteString(", ")
-			}
-			paramValues.WriteString("TODO_" + param.Name)
-		}
-	}
-
-	// 生成返回值检查
-	var returnCheck strings.Builder
-	if len(funcInfo.Returns) == 0 {
-		returnCheck.WriteString("t.Error(\"no return value to check\")")
-	} else if len(funcInfo.Returns) == 1 {
-		retType := funcInfo.Returns[0].Type
-		if strings.Contains(retType, "error") {
-			returnCheck.WriteString("if err != nil {\n\t\tt.Errorf(\"unexpected error: %v\", err)\n\t}")
-		} else {
-			returnCheck.WriteString("if got != tt.want {\n\t\tt.Errorf(\"%s() = %v, want %v\", got, tt.want)\n\t}")
-		}
-	} else {
-		// 多返回值
-		for i, ret := range funcInfo.Returns {
-			if i == 0 {
-				returnCheck.WriteString("if err != nil {\n\t\tt.Errorf(\"unexpected error: %v\", err)\n\t}\n\t\tif got != tt.want {\n\t\t\tt.Errorf(\"%s() = %v, want %v\", got, tt.want)\n\t\t}")
-			} else if strings.Contains(ret.Type, "error") {
-				returnCheck.WriteString("\n\t\tif err != nil {\n\t\t\tt.Errorf(\"unexpected error: %v\", err)\n\t\t}")
-			}
-		}
-	}
-
-	// 生成测试模板
-	tmpl := `func Test{{.Name}}(t *testing.T) {
-	type args struct {
-{{.ParamFields}}
-	}
-	tests := []struct {
-		name string
-		args args
-		want {{.WantType}}
-	}{
-		{
-			name: "TODO: 测试用例描述",
-			args: args{ {{.ParamValues}}},
-			want: {{.WantValue}},
-		},
-		// TODO: 添加更多测试用例
-		// {
-		//     name: "边界值测试",
-		//     args: args{ {{.ParamValues}}},
-		//     want: {{.WantValue}},
-		// },
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-{{.ReturnCheck}}
-		})
-	}
+	return fmt.Sprintf(`func Test%s(t *testing.T) {
+	t.Skip("TODO: 补充 %s 的真实测试用例")
 }
-`
-
-	data := struct {
-		Name        string
-		ParamFields string
-		ParamValues string
-		WantType    string
-		WantValue   string
-		ReturnCheck string
-	}{
-		Name:        funcInfo.Name,
-		ParamFields: paramFields.String(),
-		ParamValues: strings.TrimSpace(paramValues.String()),
-		WantType:    tg.getReturnType(funcInfo),
-		WantValue:   "TODO_" + tg.getReturnType(funcInfo),
-		ReturnCheck: returnCheck.String(),
-	}
-
-	// 使用模板生成
-	t, err := template.New("test").Parse(tmpl)
-	if err != nil {
-		return fmt.Sprintf("// 模板错误: %v\n\nfunc Test%s(t *testing.T) {\n\t// TODO: 生成测试\n}", err, funcInfo.Name)
-	}
-
-	var buf strings.Builder
-	if err := t.Execute(&buf, data); err != nil {
-		return fmt.Sprintf("// 模板执行错误: %v\n\nfunc Test%s(t *testing.T) {\n\t// TODO: 生成测试\n}", err, funcInfo.Name)
-	}
-
-	return buf.String()
+`, funcInfo.Name, funcInfo.Name)
 }
 
 // getReturnType 获取返回值类型
@@ -637,16 +541,16 @@ func (tg *TestGenerator) getReturnType(funcInfo FunctionInfo) string {
 
 // MockSuggestion Mock 建议
 type MockSuggestion struct {
-	InterfaceName string // 接口名
-	Methods        []MockMethod // 方法列表
-	Suggestion     string // 建议
+	InterfaceName string       // 接口名
+	Methods       []MockMethod // 方法列表
+	Suggestion    string       // 建议
 }
 
 // MockMethod Mock 方法
 type MockMethod struct {
-	Name       string // 方法名
-	Params     []string // 参数类型
-	Returns    []string // 返回值类型
+	Name    string   // 方法名
+	Params  []string // 参数类型
+	Returns []string // 返回值类型
 }
 
 // generateMockSuggestions 生成 Mock 建议
@@ -720,6 +624,23 @@ func (tg *TestGenerator) getTestFilePath(sourceFilePath string) string {
 	return filepath.Join(dir, name+"_test.go")
 }
 
+func (tg *TestGenerator) writeNewTestFile(testFilePath string, testCode string) error {
+	if _, err := os.Stat(testFilePath); err == nil {
+		return fmt.Errorf("测试文件已存在，拒绝覆盖: %s", testFilePath)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("检查测试文件失败: %w", err)
+	}
+
+	if err := os.WriteFile(testFilePath, []byte(testCode), 0644); err != nil {
+		return fmt.Errorf("写入测试文件失败: %w", err)
+	}
+	return nil
+}
+
+func (tg *TestGenerator) wrapTestFile(packageName string, testCode string) string {
+	return fmt.Sprintf("package %s\n\nimport \"testing\"\n\n%s", packageName, testCode)
+}
+
 // formatResult 格式化结果输出
 func (tg *TestGenerator) formatResult(result GenerateResult) string {
 	var output strings.Builder
@@ -735,8 +656,8 @@ func (tg *TestGenerator) formatResult(result GenerateResult) string {
 
 	if result.Coverage != nil {
 		output.WriteString("\n📈 覆盖率报告:\n")
-		output.WriteString(fmt.Sprintf("   - 语句覆盖率: %.2f%%\n", (result.Coverage.TotalStatements*100)))
-		output.WriteString(fmt.Sprintf("   - 函数覆盖率: %.2f%%\n", (result.Coverage.TotalFunctions*100)))
+		output.WriteString(fmt.Sprintf("   - 语句覆盖率: %.2f%%\n", (result.Coverage.TotalStatements * 100)))
+		output.WriteString(fmt.Sprintf("   - 函数覆盖率: %.2f%%\n", (result.Coverage.TotalFunctions * 100)))
 		if len(result.Coverage.UncoveredLines) > 0 {
 			output.WriteString(fmt.Sprintf("   - 未覆盖行号: %v\n", result.Coverage.UncoveredLines))
 		}
@@ -761,8 +682,8 @@ func (tg *TestGenerator) formatResult(result GenerateResult) string {
 
 // GenerateResult 测试生成结果
 type GenerateResult struct {
-	GeneratedFiles  []string       // 生成的测试文件
-	TestCaseCount   int            // 测试用例数量
-	Coverage        *CoverageReport // 覆盖率报告（可选）
+	GeneratedFiles  []string         // 生成的测试文件
+	TestCaseCount   int              // 测试用例数量
+	Coverage        *CoverageReport  // 覆盖率报告（可选）
 	MockSuggestions []MockSuggestion // Mock 建议（可选）
 }
