@@ -260,20 +260,11 @@ func TestBugDetector_EmptyCode(t *testing.T) {
 	detector := NewBugDetector()
 	ctx := context.Background()
 
-	result, err := detector.Run(ctx, "")
-	if err != nil {
-		t.Fatalf("检测失败: %v", err)
+	_, err := detector.Run(ctx, "")
+	if err == nil {
+		t.Fatal("空代码应该返回错误")
 	}
-
-	var analysis BugResult
-	if err := json.Unmarshal([]byte(result), &analysis); err != nil {
-		t.Fatalf("解析结果失败: %v", err)
-	}
-
-	// 空代码应该被视为有效输入
-	t.Log("空代码被正确处理")
-	t.Logf("状态: %s", analysis.Status)
-	t.Logf("摘要: %s", analysis.Summary)
+	t.Logf("空代码正确返回错误: %v", err)
 }
 
 // 测试语法错误
@@ -281,20 +272,11 @@ func TestBugDetector_SyntaxError(t *testing.T) {
 	detector := NewBugDetector()
 	ctx := context.Background()
 
-	result, err := detector.Run(ctx, "this is not valid go code {")
-	if err != nil {
-		t.Fatalf("检测失败: %v", err)
+	_, err := detector.Run(ctx, "this is not valid go code {")
+	if err == nil {
+		t.Fatal("语法错误应该返回错误")
 	}
-
-	var analysis BugResult
-	if err := json.Unmarshal([]byte(result), &analysis); err != nil {
-		t.Fatalf("解析结果失败: %v", err)
-	}
-
-	// 语法错误的文件应该在 ErrorFiles 中
-	if len(analysis.ErrorFiles) == 0 {
-		t.Log("语法错误的处理可能需要调整")
-	}
+	t.Logf("语法错误正确返回错误: %v", err)
 }
 
 // 测试多文件输入

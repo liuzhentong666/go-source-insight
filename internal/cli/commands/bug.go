@@ -49,6 +49,9 @@ func (c *BugCommand) Run(ctx context.Context, args []string, formatter output.Fo
 	if err != nil {
 		return fmt.Errorf("Bug 检测失败: %w", err)
 	}
+	if !bugResult.Success {
+		return fmt.Errorf("Bug 检测失败: %s", bugResult.Error)
+	}
 
 	// 输出结果
 	fmt.Println(formatter.Format(bugResult.Result))

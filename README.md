@@ -1,316 +1,197 @@
-# GoSource-Insight 🚀
+# GoSource-Insight
 
-这是一个基于 Go 语言开发的 AI 源码分析助手，支持命令行和 Web UI 两种使用方式。
+GoSource-Insight 是一个面向 Go 项目的源码分析工具。当前主线能力是 CLI 静态分析：扫描 Go 项目结构，基于 Go AST 执行复杂度、安全风险与常见 Bug 检测，并支持 Text/JSON 输出。
 
-## ✨ 功能特性
+说明：Milvus + Ollama 的 RAG 代码问答链路仍处于实验阶段，后续会拆分为独立的 `index` / `ask` 命令；当前 `scan` 不负责向量入库。
 
-- 📂 **源码扫描**：全自动扫描 Go 项目并进行智能切片
-- 🧠 **向量检索**：集成 Milvus 向量数据库，支持语义级代码搜索
-- 💬 **交互对话**：支持在终端与你的代码进行连续对话
-- 🌐 **Web UI界面**：基于 React + Ant Design 的可视化代码分析平台
-- 🔒 **隐私保护**：完全基于本地 Ollama 模型，代码不外传
-- 📊 **结构化日志**：支持 Text/JSON 格式，灵活的日志级别控制
-- 📈 **项目管理**：支持多项目管理，分析历史记录
-- 👥 **用户系统**：JWT 认证，用户注册/登录/资料管理
-- 🔍 **代码分析**：复杂度分析、安全扫描、Bug 检测
+## 当前可用能力
 
-## 🛠️ 技术栈
+- `scan`：扫描 Go 文件结构，统计生产代码、测试代码、总行数和跳过目录
+- `analyze`：对 Go 文件或目录执行静态规则分析
+- `complexity`：单文件复杂度分析
+- `security`：单文件安全风险检测
+- `bug`：常见 Bug 检测
+- `test`：生成单元测试
+- Text / JSON 两种输出格式
+- 统一的错误模型：所有命令在工具执行失败时正确返回非 0 退出码
 
-### 后端
+## 技术栈
+
 - Go 1.25.5
-- Gin (Web 框架)
-- GORM (ORM)
-- PostgreSQL (数据库)
-- Milvus (向量存储)
-- Ollama (LLM 引擎)
-- LangChainGo (AI 框架)
+- Go AST
+- Gin / GORM / PostgreSQL（Web API 模块）
+- React + TypeScript + Vite + Ant Design（Web UI）
+- Milvus + Ollama + LangChainGo（实验性 RAG 模块）
 
-### 前端
-- React 18 + TypeScript
-- Vite (构建工具)
-- Ant Design 5.x (UI 组件库)
-- Zustand (状态管理)
-- Monaco Editor (代码编辑器)
-- Axios (HTTP 客户端)
-
-## 🚀 快速开始
-
-### 环境要求
-
-- Go 1.25.5+
-- Node.js 18+
-- PostgreSQL 14+
-- WSL2 (Windows 用户)
-
-### 1. 克隆项目
+## 快速开始：CLI
 
 ```bash
-git clone https://github.com/yourusername/go-ai-study.git
-cd go-ai-study
+git clone <your-repository-url>
+cd GoSource-Insight
+
+go test ./internal/...
+go run ./cmd list
+go run ./cmd scan ./internal/tools
+go run ./cmd analyze ./internal/tools
 ```
 
-### 2. 配置数据库
-
-在 WSL2 中安装并配置 PostgreSQL：
+JSON 输出：
 
 ```bash
-# 安装 PostgreSQL
-sudo apt update
-sudo apt install postgresql postgresql-contrib -y
-
-# 启动服务
-sudo service postgresql start
-
-# 创建数据库
-sudo -u postgres psql -c "CREATE DATABASE goaiinsight;"
-sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD 'your_password';"
+go run ./cmd -f json scan ./internal/tools
+go run ./cmd -f json analyze ./internal/tools
 ```
 
-### 3. 配置后端
+## 命令语义
 
-编辑 `api/.env` 文件：
+| 命令 | 当前职责 | 后续关系 |
+|---|---|---|
+| `scan` | 只扫描项目结构，发现 Go 文件并统计基础信息 | 可被 `analyze` 和未来 `index` 复用 |
+| `analyze` | 执行静态规则分析，聚合复杂度/安全/Bug 统计 | 静态分析主入口 |
+| `index` | 暂未实现 | 未来负责代码切块、向量化和写入 Milvus |
+| `ask` | 暂未实现 | 未来基于已索引代码进行 RAG 问答 |
+
+## scan 示例
+
+```bash
+go run ./cmd scan ./internal/cli/commands
+```
+
+输出包含：
+
+- `total_files`
+- `production_file_count`
+- `test_file_count`
+- `total_lines`
+- `skipped_dirs`
+- `production_files`
+- `test_files`
+
+`scan` 会跳过这些目录：
+
+- `.git`
+- `vendor`
+- `node_modules`
+- `dist`
+- `build`
+- `.idea`
+- `.vscode`
+
+原因：这些目录不是当前项目源码，纳入扫描会污染统计结果或造成无意义的性能开销。
+
+## analyze 示例
+
+```bash
+go run ./cmd analyze ./internal/cli/commands
+```
+
+输出包含：
+
+- `files_analyzed`
+- `functions_analyzed`
+- `complexity_issues`
+- `security_issues`
+- `bug_issues`
+- 每个文件的分析摘要
+
+当前 `analyze` 默认只分析生产 Go 文件，不分析 `_test.go` 文件。测试代码后续可以通过 `--include-tests` 或 `--scope` 参数单独支持。
+
+## 错误模型
+
+所有 CLI 命令统一采用 ToolManager 的双通道错误模型：
+
+- **框架级错误**（ToolManager 内部异常）：`err != nil`，直接返回
+- **工具级失败**（工具执行失败，如非法 Go 文件）：`result.Success == false`，由 `result.Error` 携带错误信息
+
+每个命令在 `err != nil` 检查后，追加 `!result.Success` 检查，确保工具失败时正确退出：
+
+```go
+result, err := tm.Run(ctx, "tool_name", input)
+if err != nil {
+    return fmt.Errorf("...: %w", err)
+}
+if !result.Success {
+    return fmt.Errorf("...: %s", result.Error)
+}
+```
+
+已验证行为：
+
+- 正常 Go 文件 → exit 0，输出 JSON 结果
+- 非 Go 文件 / 非法 Go 代码 → exit 1，输出错误信息
+- 文件不存在 → exit 1，输出错误信息
+
+## Web API / Web UI
+
+Web API 与 Web UI 仍保留，但不是当前第一轮升级的主线。API 模块位于 `api/`，前端位于 `web/`。
+
+API 环境变量示例见：
+
+```bash
+api/.env.example
+```
+
+不要提交真实 `.env` 文件。
+
+## 配置示例
+
+`api/.env.example`：
 
 ```env
 PORT=8087
 DB_HOST=localhost
 DB_PORT=5432
 DB_USER=postgres
-DB_PASSWORD=your_password
+DB_PASSWORD=change...
 DB_NAME=goaiinsight
-JWT_SECRET=your_jwt_secret_key
+JWT_SECRET=change...
 ```
 
-### 4. 启动后端服务
+## 项目结构
+
+```text
+GoSource-Insight/
+├── api/                  # Web API 服务
+├── cmd/                  # CLI 入口
+├── internal/
+│   ├── ai/               # 实验性 RAG/LLM 代码问答模块
+│   ├── cli/              # CLI 命令、输出格式化
+│   └── tools/            # 静态分析工具和规则引擎
+├── web/                  # Web UI
+├── config/               # CLI 配置
+└── docker-compose.yml
+```
+
+## 验证命令
 
 ```bash
-cd api
-go mod tidy
-go run main.go
+go test ./internal/...           # 全量测试（当前 63 PASS）
+go build -o /dev/null ./cmd      # 编译检查
+go run ./cmd scan ./internal/cli/commands
+go run ./cmd analyze ./internal/cli/commands
 ```
 
-服务将在 http://localhost:8087 启动
+## 最近变更
 
-### 5. 启动前端
+### w9 — bug 命令错误传播修复
 
-```bash
-cd web
-npm install
-npm run dev
-```
+- `BugDetector.Run()`：全部 Go 文件解析失败时返回 error（保持部分失败时返回 partial JSON 的语义）
+- `bug` 命令：补 `!result.Success` 检查，与非 Go 文件/非法代码输入时正确返回 exit 1
+- 所有命令的错误模型现在一致（security / complexity / bug / test）
+- analyze 路径无影响：非法 Go 文件由前置的 complexity_analyzer 先拦截
 
-访问 http://localhost:3000 使用 Web UI
+### w7-w8 — CLI 错误模型统一
 
----
+- `security`、`complexity` 命令补 `!result.Success` 检查
+- `scan` 修复 `walkErr` 中止扫描的问题
+- `isGoFile` 改为严格匹配 `.go` 后缀
+- ToolManager 在 `execErr != nil` 时正确设置 `Success=false`
 
-## 🌐 Web UI 功能
+## 当前阶段边界
 
-### 仪表盘
-- 项目统计概览
-- 最近分析记录
-- 快速开始入口
+当前项目仍在演进中：
 
-### 项目管理
-- 创建和管理多个分析项目
-- 项目详情查看和删除
-- 分析历史记录
-
-### 代码分析
-- Monaco Editor 代码编辑
-- 复杂度分析（圈复杂度、函数统计）
-- 安全扫描（漏洞检测）
-- Bug 检测
-- 可视化分析结果
-
-### 用户系统
-- 用户注册和登录
-- JWT 认证和授权
-- 个人资料管理
-
-## 🔧 后端 API 架构
-
-### API 端点
-
-| 方法 | 端点 | 描述 | 认证 |
-|------|------|------|------|
-| GET | `/health` | 健康检查 | 否 |
-| POST | `/api/v1/users/register` | 用户注册 | 否 |
-| POST | `/api/v1/users/login` | 用户登录 | 否 |
-| GET | `/api/v1/users/profile` | 获取用户资料 | 是 |
-| POST | `/api/v1/projects` | 创建项目 | 是 |
-| GET | `/api/v1/projects` | 列出项目 | 是 |
-| GET | `/api/v1/projects/:id` | 获取项目详情 | 是 |
-| DELETE | `/api/v1/projects/:id` | 删除项目 | 是 |
-| POST | `/api/v1/analysis/analyze` | 代码分析 | 是 |
-| GET | `/api/v1/analysis/:projectId` | 获取分析结果 | 是 |
-
-### 项目结构
-
-```
-go-ai-study/
-├── api/                    # API 服务
-│   ├── config/            # 配置管理
-│   ├── database/          # 数据库连接
-│   ├── handlers/          # HTTP 处理器
-│   ├── middleware/        # 中间件（JWT、CORS）
-│   ├── models/            # 数据模型
-│   ├── routes/            # 路由定义
-│   └── main.go            # 入口文件
-├── web/                    # Web UI
-│   ├── src/
-│   │   ├── api/          # API 客户端
-│   │   ├── components/   # 公共组件
-│   │   ├── pages/        # 页面组件
-│   │   ├── stores/       # 状态管理
-│   │   └── types/        # TypeScript 类型
-│   └── package.json
-├── cmd/                    # CLI 工具
-├── internal/               # 内部包
-│   ├── ai/                # AI 引擎
-│   ├── tools/             # 分析工具
-│   └── cli/               # CLI 实现
-└── config/                 # 配置文件
-```
-
-## 📋 最近更新
-
-### 2024-04-12
-- ✅ 完成 Web UI 前端开发（React + TypeScript + Ant Design）
-- ✅ 实现用户注册/登录/资料管理
-- ✅ 实现项目 CRUD 功能
-- ✅ 集成 Monaco Editor 代码编辑器
-- ✅ 实现代码分析结果可视化（复杂度/安全/Bug）
-- ✅ 修复 PostgreSQL 数据库连接配置
-- ✅ 添加 CORS 跨域支持
-- ✅ 修复 List 组件空数据源白屏问题
-
-### 已知问题
-- ⚠️ Ant Design 组件 API 弃用警告（不影响功能）
-- ⚠️ Monaco Editor 跟踪阻止警告（浏览器隐私设置）
-
----
-
-## 📝 日志配置
-
-### 命令行参数
-
-```bash
-# 日志级别
---log-level <debug|info|warn|error>    # 默认：info
-
-# 日志格式
---log-format <text|json>              # 默认：text
-
-# 日志输出
---log-output <stdout|stderr|file>      # 默认：stdout
-
-# 日志文件路径（当 log-output=file 时使用）
---log-file <path>
-```
-
-### 使用示例
-
-```bash
-# 使用 JSON 格式日志
-go-ai-insight --log-format json analyze ./myproject
-
-# 输出日志到文件
-go-ai-insight --log-output file --log-file /var/log/insight.log test ./myproject
-
-# 使用 debug 级别
-go-ai-insight --log-level debug security ./myproject
-
-# 组合使用
-go-ai-insight --log-format json --log-level debug --log-file debug.json list
-```
-
-### 配置文件
-
-在 `~/.go-ai-insight/config.json` 中配置：
-
-```json
-{
-  "default_output": "stdout",
-  "default_format": "text",
-  "verbose": false,
-  "ollama_endpoint": "http://localhost:11434",
-  "milvus_endpoint": "http://localhost:19530",
-  "log_config": {
-    "level": "info",
-    "format": "text",
-    "output": "stdout",
-    "file_path": ""
-  }
-}
-```
-
-**注意：** 命令行参数优先级 > 配置文件
-
-### 日志级别说明
-
-| 级别 | 说明 | 使用场景 |
-|------|------|----------|
-| debug | 最详细的日志 | 开发调试 |
-| info | 常规信息 | 正常运行 |
-| warn | 警告信息 | 潜在问题 |
-| error | 错误信息 | 发生错误 |
-
-### 日志输出格式
-
-**Text 格式（默认）：**
-```
-time=2026-02-06T23:09:24.277+08:00 level=INFO msg=工具注册成功 tool=test_generator enabled=true
-```
-
-**JSON 格式：**
-```json
-{"time":"2026-02-06T23:09:26.94069409+08:00","level":"INFO","msg":"工具注册成功","tool":"test_generator","enabled":true}
-```
-
-### 生产环境推荐配置
-
-```json
-{
-  "log_config": {
-    "level": "info",
-    "format": "json",
-    "output": "file",
-    "file_path": "/var/log/go-ai-insight/app.log"
-  }
-}
-```
-
----
-
-## 🤝 贡献指南
-
-欢迎提交 Issue 和 Pull Request！
-
-### 开发流程
-
-1. Fork 项目
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 创建 Pull Request
-
-### 代码规范
-
-- Go 代码遵循 `gofmt` 格式
-- TypeScript 代码使用 ESLint 检查
-- 提交前运行测试确保通过
-
----
-
-## 📄 许可证
-
-本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件
-
----
-
-## 🙏 致谢
-
-- [Gin](https://github.com/gin-gonic/gin) - Web 框架
-- [GORM](https://gorm.io/) - ORM 库
-- [Ant Design](https://ant.design/) - UI 组件库
-- [Monaco Editor](https://microsoft.github.io/monaco-editor/) - 代码编辑器
-- [Ollama](https://ollama.ai/) - 本地 LLM 引擎
+- CLI 静态扫描与分析是当前主线
+- RAG 代码问答仍是实验模块
+- Web UI 是展示入口，不作为当前核心验收链路
+- 生产环境部署、权限隔离、多租户和增量索引属于后续阶段

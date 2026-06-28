@@ -153,6 +153,12 @@ func (bd *BugDetector) Run(ctx context.Context, input any) (string, error) {
 		allBugs = append(allBugs, bugs...)
 	}
 
+	// 如果所有 Go 文件都分析失败，则视为工具执行失败。
+	// 保留部分失败的 partial 结果，避免影响多文件批量分析语义。
+	if len(errorFiles) == len(goFiles) {
+		return "", fmt.Errorf("Bug 检测失败: 所有 Go 文件分析失败")
+	}
+
 	// 去重
 	allBugs = deduplicateBugIssues(allBugs)
 
