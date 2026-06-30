@@ -173,6 +173,15 @@ go run ./cmd analyze ./internal/cli/commands
 
 ## 最近变更
 
+### v0.1 Task 1 — RAG 配置结构 (2026-06-30)
+
+- 新增 `RAGConfig` 结构体（Collection / EmbeddingModel / ChatModel / VectorDim / TopK / ChunkMaxLines / ChunkMinLines）
+- `Config` 新增 `RAGConfig` 字段，`DefaultConfig()` 提供完整默认值
+- 新增 `NormalizeMilvusEndpoint()` 标准化 Milvus 地址（`http://host:port` → `host:port`）
+- `Load()` 兼容旧配置：缺少 `rag_config` 时保留默认值
+- 新增 `internal/config/config_test.go`（4 测试，10 子用例，全部 PASS）
+- 更新 `config/config.json` 示例
+
 ### w9 — bug 命令错误传播修复
 
 - `BugDetector.Run()`：全部 Go 文件解析失败时返回 error（保持部分失败时返回 partial JSON 的语义）
@@ -192,6 +201,14 @@ go run ./cmd analyze ./internal/cli/commands
 当前项目仍在演进中：
 
 - CLI 静态扫描与分析是当前主线
-- RAG 代码问答仍是实验模块
+- RAG 代码问答进入 v0.1 开发阶段（优先完成 CLI RAG 闭环：`index` + `ask`）
+- 企业级代码审查平台是最终目标，已规划但不在本轮实现
 - Web UI 是展示入口，不作为当前核心验收链路
 - 生产环境部署、权限隔离、多租户和增量索引属于后续阶段
+
+## 开发计划
+
+详见 `.hermes/plans/`：
+
+- `2026-06-29_195419-rag-loop-plan.md` — CLI RAG 闭环实施计划（v0.1/v0.2/v0.3）
+- `future-enterprise-platform.md` — 企业级平台未来方向

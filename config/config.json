@@ -4,6 +4,15 @@
   "verbose": false,
   "ollama_endpoint": "http://localhost:11434",
   "milvus_endpoint": "http://localhost:19530",
+  "rag_config": {
+    "collection": "code_segments",
+    "embedding_model": "bge-m3:latest",
+    "chat_model": "llama3:latest",
+    "vector_dim": 1024,
+    "top_k": 3,
+    "chunk_max_lines": 120,
+    "chunk_min_lines": 5
+  },
   "log_config": {
     "level": "info",
     "format": "text",

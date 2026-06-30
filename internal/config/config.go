@@ -4,16 +4,29 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Config 应用配置
 type Config struct {
-	DefaultOutput  string   `json:"default_output"`
-	DefaultFormat  string   `json:"default_format"`
-	Verbose        bool     `json:"verbose"`
-	OllamaEndpoint string   `json:"ollama_endpoint"`
-	MilvusEndpoint string   `json:"milvus_endpoint"`
+	DefaultOutput  string    `json:"default_output"`
+	DefaultFormat  string    `json:"default_format"`
+	Verbose        bool      `json:"verbose"`
+	OllamaEndpoint string    `json:"ollama_endpoint"`
+	MilvusEndpoint string    `json:"milvus_endpoint"`
+	RAGConfig      RAGConfig `json:"rag_config"`
 	LogConfig      LogConfig `json:"log_config"`
+}
+
+// RAGConfig RAG 功能配置
+type RAGConfig struct {
+	Collection     string `json:"collection"`
+	EmbeddingModel string `json:"embedding_model"`
+	ChatModel      string `json:"chat_model"`
+	VectorDim      int    `json:"vector_dim"`
+	TopK           int    `json:"top_k"`
+	ChunkMaxLines  int    `json:"chunk_max_lines"`
+	ChunkMinLines  int    `json:"chunk_min_lines"`
 }
 
 // LogConfig 日志配置
@@ -26,20 +39,7 @@ type LogConfig struct {
 
 // Load 加载配置
 func Load(configPath string) (*Config, error) {
-	// 默认配置
-	cfg := &Config{
-		DefaultOutput:  "stdout",
-		DefaultFormat:  "text",
-		Verbose:        false,
-		OllamaEndpoint: "http://localhost:11434",
-		MilvusEndpoint: "http://localhost:19530",
-		LogConfig: LogConfig{
-			Level:    "info",
-			Format:   "text",
-			Output:   "stdout",
-			FilePath: "",
-		},
-	}
+	cfg := DefaultConfig()
 
 	// 如果指定了配置文件，则加载
 	if configPath != "" {
@@ -80,6 +80,40 @@ func Load(configPath string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// DefaultConfig 返回应用默认配置。
+func DefaultConfig() *Config {
+	return &Config{
+		DefaultOutput:  "stdout",
+		DefaultFormat:  "text",
+		Verbose:        false,
+		OllamaEndpoint: "http://localhost:11434",
+		MilvusEndpoint: "http://localhost:19530",
+		RAGConfig: RAGConfig{
+			Collection:     "code_segments",
+			EmbeddingModel: "bge-m3:latest",
+			ChatModel:      "llama3:latest",
+			VectorDim:      1024,
+			TopK:           3,
+			ChunkMaxLines:  120,
+			ChunkMinLines:  5,
+		},
+		LogConfig: LogConfig{
+			Level:    "info",
+			Format:   "text",
+			Output:   "stdout",
+			FilePath: "",
+		},
+	}
+}
+
+// NormalizeMilvusEndpoint 将配置中的 Milvus endpoint 标准化为 SDK 需要的 host:port 格式。
+func NormalizeMilvusEndpoint(endpoint string) string {
+	endpoint = strings.TrimSpace(endpoint)
+	endpoint = strings.TrimPrefix(endpoint, "http://")
+	endpoint = strings.TrimPrefix(endpoint, "https://")
+	return strings.TrimRight(endpoint, "/")
 }
 
 // GetConfigPath 获取默认配置文件路径
