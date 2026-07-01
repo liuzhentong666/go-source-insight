@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"reflect"
 	"strings"
 
 	"github.com/tmc/langchaingo/schema"
@@ -59,13 +60,19 @@ func (cs *CodeSplitter) SplitDocuments(docs []schema.Document) ([]schema.Documen
 				// 检查函数大小
 				if end-start+1 <= cs.MaxLines {
 					// 函数不大，直接作为一个块
+					code, contextStart, contextEnd := cs.addContext(lines, start, end)
 					chunks = append(chunks, schema.Document{
-						PageContent: cs.addContext(lines, start, end, doc.Metadata),
-						Metadata:    doc.Metadata,
+						PageContent: code,
+						Metadata: chunkMetadata(doc.Metadata, map[string]any{
+							"chunk_type": "function",
+							"symbol":     fnDecl.Name.Name,
+							"start_line": contextStart + 1,
+							"end_line":   contextEnd + 1,
+						}),
 					})
 				} else {
 					// 函数太大，按逻辑子块分割
-					subChunks := cs.splitLargeFunction(lines, start, end, doc.Metadata)
+					subChunks := cs.splitLargeFunction(lines, start, end, fnDecl.Name.Name, doc.Metadata)
 					chunks = append(chunks, subChunks...)
 				}
 			}
@@ -76,9 +83,9 @@ func (cs *CodeSplitter) SplitDocuments(docs []schema.Document) ([]schema.Documen
 	return chunks, nil
 }
 
-// addContext 添加注释和上下文
-// 向前查找关联的注释，向后查找可能的相邻代码
-func (cs *CodeSplitter) addContext(lines []string, start, end int, metadata map[string]any) string {
+// addContext 添加注释上下文
+// 向前查找关联的注释，不向后吞并相邻函数，避免污染检索内容
+func (cs *CodeSplitter) addContext(lines []string, start, end int) (string, int, int) {
 	// 往前查找注释
 	contextStart := start
 	for i := start - 1; i >= 0; i-- {
@@ -93,16 +100,7 @@ func (cs *CodeSplitter) addContext(lines []string, start, end int, metadata map[
 		}
 	}
 
-	// 往后查找相邻函数（仅对较小函数处理）
 	contextEnd := end
-	if end+1 < len(lines) && end-start < 50 {
-		// 如果函数较小，可能包含相邻的小函数
-		for i := end + 1; i < len(lines) && i < end+30; i++ {
-			if strings.TrimSpace(lines[i]) != "" {
-				contextEnd = i
-			}
-		}
-	}
 
 	// 边界保护
 	if contextStart < 0 {
@@ -112,15 +110,15 @@ func (cs *CodeSplitter) addContext(lines []string, start, end int, metadata map[
 		contextEnd = len(lines) - 1
 	}
 	if contextStart > contextEnd {
-		return ""
+		return "", contextStart, contextEnd
 	}
 
-	return strings.Join(lines[contextStart:contextEnd+1], "\n")
+	return strings.Join(lines[contextStart:contextEnd+1], "\n"), contextStart, contextEnd
 }
 
 // splitLargeFunction 分割大函数
 // 按照逻辑分割点将大函数拆分为多个较小的块
-func (cs *CodeSplitter) splitLargeFunction(lines []string, start, end int, metadata map[string]any) []schema.Document {
+func (cs *CodeSplitter) splitLargeFunction(lines []string, start, end int, symbol string, metadata map[string]any) []schema.Document {
 	var chunks []schema.Document
 	currentStart := start
 	commentBuffer := ""
@@ -145,7 +143,12 @@ func (cs *CodeSplitter) splitLargeFunction(lines []string, start, end int, metad
 				code := commentBuffer + strings.Join(lines[currentStart:i+1], "\n")
 				chunks = append(chunks, schema.Document{
 					PageContent: code,
-					Metadata:    metadata,
+					Metadata: chunkMetadata(metadata, map[string]any{
+						"chunk_type": "function",
+						"symbol":     symbol,
+						"start_line": currentStart + 1,
+						"end_line":   i + 1,
+					}),
 				})
 				// 重置
 				currentStart = i + 1
@@ -159,7 +162,12 @@ func (cs *CodeSplitter) splitLargeFunction(lines []string, start, end int, metad
 		code := commentBuffer + strings.Join(lines[currentStart:end+1], "\n")
 		chunks = append(chunks, schema.Document{
 			PageContent: code,
-			Metadata:    metadata,
+			Metadata: chunkMetadata(metadata, map[string]any{
+				"chunk_type": "function",
+				"symbol":     symbol,
+				"start_line": currentStart + 1,
+				"end_line":   end + 1,
+			}),
 		})
 	}
 
@@ -196,9 +204,84 @@ func (cs *CodeSplitter) simpleSplitByLines(doc schema.Document) []schema.Documen
 		}
 		chunks = append(chunks, schema.Document{
 			PageContent: strings.Join(lines[i:end], "\n"),
-			Metadata:    doc.Metadata,
+			Metadata: chunkMetadata(doc.Metadata, map[string]any{
+				"chunk_type": "text",
+				"start_line": i + 1,
+				"end_line":   end,
+			}),
 		})
 	}
 
 	return chunks
+}
+
+func chunkMetadata(base map[string]any, fields map[string]any) map[string]any {
+	metadata := make(map[string]any, len(base)+len(fields))
+	for k, v := range base {
+		metadata[k] = cloneMetadataValue(v)
+	}
+	for k, v := range fields {
+		metadata[k] = cloneMetadataValue(v)
+	}
+	return metadata
+}
+
+func cloneMetadataValue(value any) any {
+	if value == nil {
+		return nil
+	}
+	return cloneMetadataReflect(reflect.ValueOf(value)).Interface()
+}
+
+func cloneMetadataReflect(value reflect.Value) reflect.Value {
+	if !value.IsValid() {
+		return value
+	}
+
+	switch value.Kind() {
+	case reflect.Interface:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		cloned := cloneMetadataReflect(value.Elem())
+		if cloned.Type().AssignableTo(value.Type()) {
+			return cloned
+		}
+		result := reflect.New(value.Type()).Elem()
+		result.Set(cloned)
+		return result
+	case reflect.Pointer:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		cloned := reflect.New(value.Elem().Type())
+		cloned.Elem().Set(cloneMetadataReflect(value.Elem()))
+		return cloned
+	case reflect.Slice:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		cloned := reflect.MakeSlice(value.Type(), value.Len(), value.Len())
+		for i := 0; i < value.Len(); i++ {
+			cloned.Index(i).Set(cloneMetadataReflect(value.Index(i)))
+		}
+		return cloned
+	case reflect.Array:
+		cloned := reflect.New(value.Type()).Elem()
+		for i := 0; i < value.Len(); i++ {
+			cloned.Index(i).Set(cloneMetadataReflect(value.Index(i)))
+		}
+		return cloned
+	case reflect.Map:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		cloned := reflect.MakeMapWithSize(value.Type(), value.Len())
+		for _, key := range value.MapKeys() {
+			cloned.SetMapIndex(key, cloneMetadataReflect(value.MapIndex(key)))
+		}
+		return cloned
+	default:
+		return value
+	}
 }

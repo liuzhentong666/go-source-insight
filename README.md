@@ -173,14 +173,29 @@ go run ./cmd analyze ./internal/cli/commands
 
 ## 最近变更
 
-### v0.1 Task 1 — RAG 配置结构 (2026-06-30)
+### v0.1 Task 2 — Go 源码扫描器 (2026-07-01)
 
-- 新增 `RAGConfig` 结构体（Collection / EmbeddingModel / ChatModel / VectorDim / TopK / ChunkMaxLines / ChunkMinLines）
-- `Config` 新增 `RAGConfig` 字段，`DefaultConfig()` 提供完整默认值
-- 新增 `NormalizeMilvusEndpoint()` 标准化 Milvus 地址（`http://host:port` → `host:port`）
-- `Load()` 兼容旧配置：缺少 `rag_config` 时保留默认值
-- 新增 `internal/config/config_test.go`（4 测试，10 子用例，全部 PASS）
-- 更新 `config/config.json` 示例
+- 新增 `internal/ai/scanner.go`：递归扫描目录，提取 Go 源码为 `[]schema.Document`
+- `ScanCode(path)`：支持单文件与目录，自动跳过非 Go 文件和忽略目录
+- 每个 Document 携带 `source`、`relative_source`、`file_name` 等元数据
+- 新增 `internal/ai/scanner_test.go`（5 测试，全部 PASS）
+- 验证：单文件扫描、目录扫描、跳过忽略目录、不存在路径报错、非 Go 文件跳过
+
+### v0.1 Task 3 — 代码智能分块 + metadata 深拷贝 (2026-07-01)
+
+- 新增 `internal/ai/code_splitter.go`：基于 Go AST 按函数边界智能分块
+  - `CodeSplitter`：按 `MaxLines` 控制块大小，<100 行函数直接成块，超限按逻辑分割点拆分
+  - 逻辑分割点：`if`/`for`/`switch`/`case`/`} else` 及显式分割注释
+  - `addContext`：向前查找关联注释，不向后吞并相邻函数，避免检索污染
+  - 解析失败时回退到等宽行分割（`simpleSplitByLines`）
+- `chunkMetadata()`：每个 chunk 拥有独立的 metadata map（不共享 `doc.Metadata` 引用）
+- `cloneMetadataValue()`：基于 `reflect.Kind` 的泛化深拷贝，覆盖所有 slice/map/pointer 组合
+  - 消除 type-switch 的类型盲区（`[]float64`/`[]bool`/`map[string][]string` 等）
+  - 按 `Interface`/`Pointer`/`Slice`/`Array`/`Map` Kind 递归，不依赖具体类型枚举
+- 新增 `internal/ai/code_splitter_test.go`（5 测试，全部 PASS）
+  - 函数块元数据、source 隔离、多层可变值隔离、语法错误回退、大函数分割
+  - `TestCodeSplitter_MetadataValueIsolation`：12 条断言覆盖 string/int/float64/bool slice 及嵌套 map 的值隔离
+- 全量：`internal/ai` 包 10 测试 PASS，`go vet` / `go test -race` 通过
 
 ### w9 — bug 命令错误传播修复
 
