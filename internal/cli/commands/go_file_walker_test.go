@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -85,7 +87,7 @@ func TestCollectGoFilesFromDirectorySkipsNoiseAndCountsTests(t *testing.T) {
 	}
 }
 
-func TestCollectGoFilesSkipsUnreadableSubdirectory(t *testing.T) {
+func TestCollectGoFilesRejectsUnreadableSubdirectory(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod permission behavior differs on Windows")
 	}
@@ -102,16 +104,12 @@ func TestCollectGoFilesSkipsUnreadableSubdirectory(t *testing.T) {
 		_ = os.Chmod(blockedDir, 0755)
 	})
 
-	result, err := collectGoFiles(tmp)
-	if err != nil {
-		t.Fatalf("collectGoFiles failed: %v", err)
+	if _, err := os.ReadDir(blockedDir); err == nil {
+		t.Skip("requires a user without permission to read the blocked directory")
 	}
-
-	if result.TotalFiles != 1 {
-		t.Fatalf("TotalFiles = %d, want 1; files=%v", result.TotalFiles, result.Files)
-	}
-	if len(result.SkippedDirs) == 0 {
-		t.Fatalf("SkippedDirs is empty, want blocked dir recorded")
+	_, err := collectGoFiles(tmp)
+	if !errors.Is(err, fs.ErrPermission) {
+		t.Fatalf("collectGoFiles error = %v, want permission error rather than incomplete success", err)
 	}
 }
 

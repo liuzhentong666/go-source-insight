@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import { projectApi } from '../api/project';
+import { getApiErrorMessage } from '../api/client';
+import { getSessionGeneration, onSessionReset } from '../utils/session';
 import type { Project, CreateProjectRequest } from '../types';
 
 interface ProjectState {
@@ -20,29 +22,35 @@ export const useProjectStore = create<ProjectState>((set) => ({
   error: null,
 
   fetchProjects: async () => {
+    const generation = getSessionGeneration();
     set({ isLoading: true, error: null });
     try {
       const projects = await projectApi.getProjects();
+      if (generation !== getSessionGeneration()) return;
       set({ projects, isLoading: false });
-    } catch (error: any) {
+    } catch (error) {
+      if (generation !== getSessionGeneration()) return;
       set({
-        error: error.response?.data?.error || '获取项目列表失败',
+        error: getApiErrorMessage(error, '获取项目列表失败'),
         isLoading: false,
       });
     }
   },
 
   createProject: async (data) => {
+    const generation = getSessionGeneration();
     set({ isLoading: true, error: null });
     try {
       const project = await projectApi.createProject(data);
+      if (generation !== getSessionGeneration()) return;
       set((state) => ({
         projects: [...state.projects, project],
         isLoading: false,
       }));
-    } catch (error: any) {
+    } catch (error) {
+      if (generation !== getSessionGeneration()) throw error;
       set({
-        error: error.response?.data?.error || '创建项目失败',
+        error: getApiErrorMessage(error, '创建项目失败'),
         isLoading: false,
       });
       throw error;
@@ -50,16 +58,19 @@ export const useProjectStore = create<ProjectState>((set) => ({
   },
 
   deleteProject: async (id) => {
+    const generation = getSessionGeneration();
     set({ isLoading: true, error: null });
     try {
       await projectApi.deleteProject(id);
+      if (generation !== getSessionGeneration()) return;
       set((state) => ({
         projects: state.projects.filter((p) => p.id !== id),
         isLoading: false,
       }));
-    } catch (error: any) {
+    } catch (error) {
+      if (generation !== getSessionGeneration()) throw error;
       set({
-        error: error.response?.data?.error || '删除项目失败',
+        error: getApiErrorMessage(error, '删除项目失败'),
         isLoading: false,
       });
       throw error;
@@ -70,3 +81,5 @@ export const useProjectStore = create<ProjectState>((set) => ({
     set({ currentProject: project });
   },
 }));
+
+onSessionReset(() => useProjectStore.setState({ projects: [], currentProject: null, isLoading: false, error: null }));

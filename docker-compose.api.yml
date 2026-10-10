@@ -1,0 +1,71 @@
+# Merge explicitly with docker-compose.yml. Base CLI operations never require
+# API credentials, because interpolation of this file is opt-in.
+services:
+  postgres:
+    profiles: [api]
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: goaiinsight
+      POSTGRES_USER: insight
+      POSTGRES_PASSWORD: ${API_DB_PASSWORD:?Set API_DB_PASSWORD or use the API deployment script}
+    volumes:
+      - api_postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 5s
+      start_period: 10s
+      retries: 12
+
+  api:
+    profiles: [api]
+    build:
+      context: .
+      target: api
+    image: go-source-insight-api:local
+    environment:
+      PORT: "8080"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: insight
+      DB_NAME: goaiinsight
+      DB_PASSWORD: ${API_DB_PASSWORD:?Set API_DB_PASSWORD or use the API deployment script}
+      JWT_SECRET: ${API_JWT_SECRET:?Set API_JWT_SECRET or use the API deployment script}
+      SOURCE_ROOT: /sources
+      JOB_WORKERS: ${JOB_WORKERS:-2}
+      JOB_QUEUE_SIZE: ${JOB_QUEUE_SIZE:-16}
+      JOB_TIMEOUT_SECONDS: ${JOB_TIMEOUT_SECONDS:-900}
+      SHUTDOWN_TIMEOUT_SECONDS: ${SHUTDOWN_TIMEOUT_SECONDS:-30}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      GO_AI_INSIGHT_OLLAMA_ENDPOINT: http://ollama:11434
+      GO_AI_INSIGHT_MILVUS_ENDPOINT: milvus:19530
+      GO_AI_INSIGHT_EMBEDDING_MODEL: ${GO_AI_INSIGHT_EMBEDDING_MODEL:-bge-m3:latest}
+      GO_AI_INSIGHT_CHAT_MODEL: ${GO_AI_INSIGHT_CHAT_MODEL:-llama3:latest}
+      GO_AI_INSIGHT_VECTOR_DIM: ${GO_AI_INSIGHT_VECTOR_DIM:-1024}
+      GO_AI_INSIGHT_TOP_K: ${GO_AI_INSIGHT_TOP_K:-3}
+      GO_AI_INSIGHT_CHUNK_MAX_LINES: ${GO_AI_INSIGHT_CHUNK_MAX_LINES:-120}
+      GO_AI_INSIGHT_CHUNK_MIN_LINES: ${GO_AI_INSIGHT_CHUNK_MIN_LINES:-5}
+      GO_AI_INSIGHT_TIMEOUT_SECONDS: ${GO_AI_INSIGHT_TIMEOUT_SECONDS:-300}
+    ports:
+      - "127.0.0.1:${API_PORT:-8087}:8080"
+    volumes:
+      - type: bind
+        source: ${API_SOURCE_DIR:-./sources}
+        target: /sources
+        read_only: true
+        bind:
+          create_host_path: false
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    stop_grace_period: 45s
+
+volumes:
+  api_postgres_data:

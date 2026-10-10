@@ -1,29 +1,20 @@
 package output
 
-import (
-	"encoding/json"
-)
+import "encoding/json"
 
-// JSONFormatter JSON 格式化器
 type JSONFormatter struct{}
 
-// NewJSONFormatter 创建 JSON 格式化器
-func NewJSONFormatter() *JSONFormatter {
-	return &JSONFormatter{}
-}
+func NewJSONFormatter() *JSONFormatter { return &JSONFormatter{} }
 
-// Format 格式化输出为 JSON
+// Format keeps structured results as JSON objects, rather than escaped strings.
 func (j *JSONFormatter) Format(result string) string {
-	// 将结果封装为 JSON
-	output := map[string]interface{}{
-		"success": true,
-		"result":  result,
+	var value any = result
+	if json.Valid([]byte(result)) {
+		value = json.RawMessage(result)
 	}
-
-	data, err := json.MarshalIndent(output, "", "  ")
+	data, err := json.MarshalIndent(map[string]any{"success": true, "result": value}, "", "  ")
 	if err != nil {
-		return `{"success": false, "error": "格式化失败"}`
+		return "{\"success\":false,\"error\":\"格式化失败\"}"
 	}
-
 	return string(data)
 }

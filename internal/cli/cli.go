@@ -1,40 +1,41 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"os"
+	"time"
+
+	"go-ai-study/internal/ai"
 	"go-ai-study/internal/cli/commands"
 	"go-ai-study/internal/cli/output"
 	"go-ai-study/internal/config"
 	"go-ai-study/internal/tools"
 )
 
-// CLI 主 CLI 结构
 type CLI struct {
 	toolManager     *tools.ToolManager
 	commandRegistry *commands.CommandRegistry
 	config          *config.Config
 	formatter       output.Formatter
+	outputPath      string
+	writer          io.Writer
+	ragFactory      commands.RAGFactory
 }
 
-// NewCLI 创建 CLI
-func NewCLI(configPath, format string, outputPath string, verbose bool,
-	logLevel, logFormat, logOutput, logFilePath string) (*CLI, error) {
-	// 加载配置
-	cfg, err := config.Load(configPath)
+func NewCLI(configPath, format, outputPath string, verbose bool, logLevel, logFormat, logOutput, logFilePath string) (*CLI, error) {
+	cfg, err := config.LoadUnvalidated(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("加载配置失败: %w", err)
 	}
-
-	// 命令行参数优先级高于配置文件
-	if format != "text" {
+	if format != "" {
 		cfg.DefaultFormat = format
 	}
 	if verbose {
 		cfg.Verbose = true
 	}
-
-	// 日志配置：命令行参数优先级 > 配置文件
 	if logLevel != "" {
 		cfg.LogConfig.Level = logLevel
 	}
@@ -47,129 +48,139 @@ func NewCLI(configPath, format string, outputPath string, verbose bool,
 	if logFilePath != "" {
 		cfg.LogConfig.FilePath = logFilePath
 	}
-
-	// 创建输出格式化器
-	var formatter output.Formatter
-	outputOptions := output.Options{
-		Verbose: cfg.Verbose,
+	// Reports own stdout. Logs must never corrupt JSON or redirected reports.
+	if cfg.LogConfig.Output == "stdout" {
+		cfg.LogConfig.Output = "stderr"
 	}
-
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	var formatter output.Formatter
 	switch cfg.DefaultFormat {
 	case "json":
 		formatter = output.NewJSONFormatter()
 	case "text":
-		formatter = output.NewTextFormatter(outputOptions)
+		formatter = output.NewTextFormatter(output.Options{Verbose: cfg.Verbose})
 	default:
 		return nil, fmt.Errorf("不支持的输出格式: %s", cfg.DefaultFormat)
 	}
-
-	// 创建 ToolManager
-	logger := tools.NewLoggerFactory(&cfg.LogConfig)
+	logger, err := tools.NewLoggerFactory(&cfg.LogConfig)
+	if err != nil {
+		return nil, fmt.Errorf("日志初始化失败: %w", err)
+	}
 	toolManager := tools.NewToolManager(logger)
-
-	// 注册所有工具
 	registerTools(toolManager)
-
-	// 创建命令注册表
-	commandRegistry := commands.NewCommandRegistry()
-	registerCommands(commandRegistry, toolManager)
-
-	return &CLI{
-		toolManager:     toolManager,
-		commandRegistry: commandRegistry,
-		config:          cfg,
-		formatter:       formatter,
-	}, nil
+	if outputPath == "" && cfg.DefaultOutput != "stdout" && cfg.DefaultOutput != "stderr" {
+		outputPath = cfg.DefaultOutput
+	}
+	c := &CLI{toolManager: toolManager, config: cfg, formatter: formatter, outputPath: outputPath, writer: os.Stdout}
+	if cfg.DefaultOutput == "stderr" {
+		c.writer = os.Stderr
+	}
+	c.ragFactory = c.newRAG
+	c.commandRegistry = commands.NewCommandRegistry()
+	registerCommands(c.commandRegistry, toolManager)
+	c.commandRegistry.Register(commands.NewIndexCommand(func(ctx context.Context, collection string) (commands.RAGClient, error) {
+		return c.ragFactory(ctx, collection)
+	}))
+	c.commandRegistry.Register(commands.NewAskCommand(func(ctx context.Context, collection string) (commands.RAGClient, error) {
+		return c.ragFactory(ctx, collection)
+	}))
+	c.commandRegistry.Register(commands.NewDoctorCommand(func(ctx context.Context, collection string) (commands.RAGClient, error) {
+		return c.ragFactory(ctx, collection)
+	}))
+	return c, nil
 }
 
-// registerTools 注册所有工具
+func (c *CLI) newRAG(ctx context.Context, collection string) (commands.RAGClient, error) {
+	cfg := *c.config
+	if collection != "" {
+		cfg.RAGConfig.Collection = collection
+	}
+	if err := cfg.ValidateRAG(); err != nil {
+		return nil, fmt.Errorf("AI 配置无效: %w", err)
+	}
+	r := cfg.RAGConfig
+	return ai.NewOllamaRAGService(ctx, ai.FactoryOptions{
+		OllamaEndpoint: cfg.OllamaEndpoint, MilvusEndpoint: cfg.MilvusEndpoint,
+		Timeout: time.Duration(cfg.RequestTimeoutSeconds) * time.Second,
+		RAG: ai.RAGOptions{Collection: r.Collection, EmbeddingModel: r.EmbeddingModel, ChatModel: r.ChatModel,
+			VectorDim: r.VectorDim, TopK: r.TopK, ChunkMaxLines: r.ChunkMaxLines, ChunkMinLines: r.ChunkMinLines},
+	})
+}
+
 func registerTools(tm *tools.ToolManager) {
-	// 获取 ToolManager 的 logger
 	logger := tm.GetLogger()
-
-	// 注册测试生成器
-	tm.Register(
-		tools.NewTestGenerator(logger),
-		tools.DefaultToolConfig("test_generator"),
-	)
-
-	// 注册复杂度分析器
-	tm.Register(
-		tools.NewComplexityAnalyzer(),
-		tools.DefaultToolConfig("complexity_analyzer"),
-	)
-
-	// 注册安全扫描器
-	tm.Register(
-		tools.NewSecurityScanner(),
-		tools.DefaultToolConfig("security_scanner"),
-	)
-
-	// 注册 Bug 检测器
-	tm.Register(
-		tools.NewBugDetector(),
-		tools.DefaultToolConfig("bug_detector"),
-	)
+	tm.Register(tools.NewTestGenerator(logger), tools.DefaultToolConfig("test_generator"))
+	tm.Register(tools.NewComplexityAnalyzer(), tools.DefaultToolConfig("complexity_analyzer"))
+	tm.Register(tools.NewSecurityScanner(), tools.DefaultToolConfig("security_scanner"))
+	tm.Register(tools.NewBugDetector(), tools.DefaultToolConfig("bug_detector"))
 }
-
-// registerCommands 注册所有命令
-func registerCommands(registry *commands.CommandRegistry, toolManager *tools.ToolManager) {
-	registry.Register(commands.NewAnalyzeCommand(toolManager))
-	registry.Register(commands.NewTestCommand(toolManager))
-	registry.Register(commands.NewSecurityCommand(toolManager))
-	registry.Register(commands.NewBugCommand(toolManager))
-	registry.Register(commands.NewComplexityCommand(toolManager))
+func registerCommands(registry *commands.CommandRegistry, tm *tools.ToolManager) {
+	registry.Register(commands.NewAnalyzeCommand(tm))
+	registry.Register(commands.NewTestCommand(tm))
+	registry.Register(commands.NewSecurityCommand(tm))
+	registry.Register(commands.NewBugCommand(tm))
+	registry.Register(commands.NewComplexityCommand(tm))
 	registry.Register(commands.NewScanCommand())
 	registry.Register(commands.NewListCommand(registry))
 }
 
-// Run 执行 CLI
 func (c *CLI) Run(ctx context.Context, args []string) error {
-	// 如果没有参数，显示帮助
-	if len(args) == 0 {
-		return c.printHelp()
+	var buffer bytes.Buffer
+	formatter := output.WithWriter(c.formatter, &buffer)
+	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
+		if err := output.Print(formatter, helpText); err != nil {
+			return err
+		}
+	} else {
+		cmd, ok := c.commandRegistry.Get(args[0])
+		if !ok {
+			return fmt.Errorf("未知命令: %s；运行 list 查看可用命令", args[0])
+		}
+		if err := cmd.Run(ctx, args[1:], formatter); err != nil {
+			return err
+		}
 	}
-
-	commandName := args[0]
-	commandArgs := args[1:]
-
-	// 获取命令
-	cmd, ok := c.commandRegistry.Get(commandName)
-	if !ok {
-		return fmt.Errorf("未知命令: %s\n运行 'go-ai-insight list' 查看可用命令", commandName)
+	if c.outputPath != "" {
+		if err := os.WriteFile(c.outputPath, buffer.Bytes(), 0644); err != nil {
+			return fmt.Errorf("写入报告失败: %w", err)
+		}
+		return nil
 	}
-
-	// 执行命令
-	return cmd.Run(ctx, commandArgs, c.formatter)
+	_, err := io.Copy(c.writer, &buffer)
+	return err
 }
 
-// printHelp 打印帮助信息
-func (c *CLI) printHelp() error {
-	fmt.Println("go-ai-insight - Go 代码分析和测试工具")
-	fmt.Println("")
-	fmt.Println("使用:")
-	fmt.Println("  go-ai-insight <command> [options]")
-	fmt.Println("")
-	fmt.Println("命令:")
-	fmt.Println("  scan        扫描 Go 项目结构并输出文件统计")
-	fmt.Println("  analyze     对 Go 文件或目录执行静态规则分析")
-	fmt.Println("  test        生成测试")
-	fmt.Println("  security    安全扫描")
-	fmt.Println("  bug         Bug 检测")
-	fmt.Println("  complexity  复杂度分析")
-	fmt.Println("  list        列出所有可用工具")
-	fmt.Println("")
-	fmt.Println("全局选项:")
-	fmt.Println("  -c, --config <file>   配置文件路径")
-	fmt.Println("  -f, --format <format> 输出格式 (json|text)")
-	fmt.Println("  -o, --output <file>   输出文件路径")
-	fmt.Println("  -v, --verbose         详细输出")
-	fmt.Println("  --version             显示版本信息")
-	fmt.Println("")
-	fmt.Println("示例:")
-	fmt.Println("  go-ai-insight analyze ./myproject")
-	fmt.Println("  go-ai-insight test ./myproject -f json -o result.json")
-	fmt.Println("  go-ai-insight security ./myproject -v")
+const helpText = `go-ai-insight - Go 源码扫描、静态分析与 Ollama 问答
 
-	return nil
-}
+使用: go-ai-insight [全局参数] COMMAND [命令参数]
+
+核心命令:
+  scan PATH                  扫描 Go 源码结构
+  analyze PATH               执行静态规则分析
+  index [--collection NAME] PATH
+                             建立/更新当前代码库索引
+  ask [--collection NAME] [--file RELATIVE_PATH] QUESTION
+                             基于已有索引问答
+
+其他命令: doctor（服务检查）、complexity、security、bug、test（测试骨架）、list
+
+全局参数（放在命令前）:
+  -c, --config FILE          配置文件
+  -f, --format text|json     报告格式
+  -o, --output FILE          写入报告文件
+  -v, --verbose             详细输出
+  --log-level LEVEL         日志级别
+  --log-format text|json     日志格式
+  --log-output stderr|file  日志输出
+  --log-file FILE           日志文件
+  --version                 版本信息
+
+示例:
+  go-ai-insight scan ./project
+  go-ai-insight -f json -o report.json analyze ./project
+  go-ai-insight index --collection sample_code ./project
+  go-ai-insight ask --collection sample_code "项目的入口在哪里？"
+
+外部模型 API、Web 平台：TODO。`

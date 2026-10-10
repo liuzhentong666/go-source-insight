@@ -5,16 +5,16 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
-	"github.com/go-ai-study/api/database"
-	"github.com/go-ai-study/api/models"
+	"go-ai-study/api/database"
+	"go-ai-study/api/models"
 	"gorm.io/gorm"
 )
 
 // CreateProject 创建项目
 func CreateProject(c *gin.Context) {
 	var req models.CreateProjectRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if err := decodeRequest(c, &req, false); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid project metadata"})
 		return
 	}
 
@@ -97,7 +97,12 @@ func GetProject(c *gin.Context) {
 
 	// 查询项目
 	var project models.Project
-	result := database.DB.First(&project, projectID)
+	id, err := strconv.ParseUint(projectID, 10, 32)
+	if err != nil || id == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid project id"})
+		return
+	}
+	result := database.DB.First(&project, id)
 	if result.Error != nil {
 		if result.Error == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})

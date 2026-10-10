@@ -54,7 +54,5 @@ func (c *BugCommand) Run(ctx context.Context, args []string, formatter output.Fo
 	}
 
 	// 输出结果
-	fmt.Println(formatter.Format(bugResult.Result))
-
-	return nil
+	return output.Print(formatter, bugResult.Result)
 }

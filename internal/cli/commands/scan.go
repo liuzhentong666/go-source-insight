@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"go-ai-study/internal/cli/output"
+	"go-ai-study/internal/source"
 )
 
 // ScanCommand 扫描命令
@@ -31,7 +32,7 @@ func (c *ScanCommand) Run(ctx context.Context, args []string, formatter output.F
 		return fmt.Errorf("需要指定路径")
 	}
 
-	result, err := collectGoFiles(args[0])
+	result, err := source.Scan(ctx, args[0])
 	if err != nil {
 		return err
 	}
@@ -41,7 +42,5 @@ func (c *ScanCommand) Run(ctx context.Context, args []string, formatter output.F
 		return fmt.Errorf("序列化扫描结果失败: %w", err)
 	}
 
-	fmt.Println(formatter.Format(string(jsonBytes)))
-	_ = ctx
-	return nil
+	return output.Print(formatter, string(jsonBytes))
 }

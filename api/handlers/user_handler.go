@@ -4,17 +4,17 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/go-ai-study/api/database"
-	"github.com/go-ai-study/api/models"
-	"github.com/go-ai-study/api/utils"
+	"go-ai-study/api/database"
+	"go-ai-study/api/models"
+	"go-ai-study/api/utils"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
 func RegisterUser(c *gin.Context) {
 	var req models.RegisterRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if err := decodeRequest(c, &req, false); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid registration body"})
 		return
 	}
 
@@ -48,9 +48,9 @@ func RegisterUser(c *gin.Context) {
 
 	// 创建用户
 	user := models.User{
-		Username:  req.Username,
-		Email:     req.Email,
-		Password:  string(hashedPassword),
+		Username: req.Username,
+		Email:    req.Email,
+		Password: string(hashedPassword),
 	}
 
 	// 保存到数据库
@@ -61,7 +61,8 @@ func RegisterUser(c *gin.Context) {
 	}
 
 	// 生成JWT token
-	token, err := utils.GenerateJWT(user)
+	signer, _ := c.MustGet("token_service").(*utils.Tokens)
+	token, err := signer.Generate(user)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
 		return
@@ -77,8 +78,8 @@ func RegisterUser(c *gin.Context) {
 
 func LoginUser(c *gin.Context) {
 	var req models.LoginRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if err := decodeRequest(c, &req, false); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid login body"})
 		return
 	}
 
@@ -108,7 +109,8 @@ func LoginUser(c *gin.Context) {
 	}
 
 	// 生成JWT token
-	token, err := utils.GenerateJWT(user)
+	signer, _ := c.MustGet("token_service").(*utils.Tokens)
+	token, err := signer.Generate(user)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
 		return

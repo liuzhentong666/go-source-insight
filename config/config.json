@@ -3,7 +3,8 @@
   "default_format": "text",
   "verbose": false,
   "ollama_endpoint": "http://localhost:11434",
-  "milvus_endpoint": "http://localhost:19530",
+  "milvus_endpoint": "localhost:19530",
+  "request_timeout_seconds": 300,
   "rag_config": {
     "collection": "code_segments",
     "embedding_model": "bge-m3:latest",
@@ -16,7 +17,7 @@
   "log_config": {
     "level": "info",
     "format": "text",
-    "output": "stdout",
+    "output": "stderr",
     "file_path": ""
   }
 }

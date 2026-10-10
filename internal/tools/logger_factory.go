@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"strconv"
@@ -19,18 +20,16 @@ type loggerFactory struct {
 }
 
 // NewLoggerFactory 创建日志工厂
-func NewLoggerFactory(cfg *config.LogConfig) Logger {
+func NewLoggerFactory(cfg *config.LogConfig) (Logger, error) {
 	factory := &loggerFactory{}
-	logger, err := factory.CreateLogger(cfg)
-	if err != nil {
-		// 如果创建失败，返回默认的 stderr logger
-		return NewDefaultLogger(slog.LevelError)
-	}
-	return logger
+	return factory.CreateLogger(cfg)
 }
 
 // CreateLogger 根据配置创建日志记录器
 func (lf *loggerFactory) CreateLogger(cfg *config.LogConfig) (Logger, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("日志配置不能为空")
+	}
 	// 1. 解析日志级别
 	level := parseLogLevel(cfg.Level)
 
@@ -51,8 +50,7 @@ func (lf *loggerFactory) CreateLogger(cfg *config.LogConfig) (Logger, error) {
 		}
 		lf.file = file
 	default:
-		// 默认输出到 stdout
-		handler = createHandler(os.Stdout, cfg.Format, level)
+		return nil, fmt.Errorf("不支持的日志输出: %s", cfg.Output)
 	}
 
 	// 3. 创建 logger

@@ -4,19 +4,19 @@ import type { LoginRequest, RegisterRequest, LoginResponse, User } from '../type
 export const authApi = {
   // 登录
   login: async (data: LoginRequest): Promise<LoginResponse> => {
-    const response = await apiClient.post('/api/v1/users/login', data);
+    const response = await apiClient.post('/users/login', { username: data.username, password: data.password });
     return response.data;
   },
 
   // 注册
   register: async (data: RegisterRequest): Promise<LoginResponse> => {
-    const response = await apiClient.post('/api/v1/users/register', data);
+    const response = await apiClient.post('/users/register', { username: data.username, email: data.email, password: data.password });
     return response.data;
   },
 
   // 获取用户信息
-  getProfile: async (): Promise<User> => {
-    const response = await apiClient.get('/api/v1/users/profile');
+  getProfile: async (signal?: AbortSignal): Promise<User> => {
+    const response = await apiClient.get('/users/profile', { signal });
     return response.data;
   },
 };

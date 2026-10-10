@@ -7,16 +7,17 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "test": "node --experimental-strip-types --import ./tests/register.mjs --test tests/*.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
     "antd": "^6.3.5",
-    "axios": "^1.15.0",
+    "axios": "^1.20.0",
     "echarts": "^6.0.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "react-router-dom": "^7.14.0",
+    "react-router-dom": "^7.18.4",
     "zustand": "^5.0.12"
   },
   "devDependencies": {

@@ -32,6 +32,7 @@ func TestCodeSplitter_FunctionChunkMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SplitDocuments returned error: %v", err)
 	}
+	chunks = chunksOfType(chunks, "function")
 	if len(chunks) != 2 {
 		t.Fatalf("len(chunks) = %d, want 2", len(chunks))
 	}
@@ -41,6 +42,36 @@ func TestCodeSplitter_FunctionChunkMetadata(t *testing.T) {
 
 	if strings.Contains(chunks[0].PageContent, "func Beta") {
 		t.Fatal("first function chunk contains following function Beta")
+	}
+}
+
+func TestCodeSplitterUsesPhysicalPositionsForLineDirectives(t *testing.T) {
+	code := "package sample\n//line mapped.go:100\nfunc Hello() {}\n//line another.go:1\n// World is a second declaration.\nfunc World() {}"
+	chunks, err := NewCodeSplitter().SplitDocuments([]schema.Document{{PageContent: code, Metadata: map[string]any{"source": "sample.go"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(code, "\n")
+	var reconstructed []string
+	for _, chunk := range chunks {
+		start, end := chunk.Metadata["start_line"].(int), chunk.Metadata["end_line"].(int)
+		if start < 1 || end > len(lines) || end < start {
+			t.Fatalf("invalid physical range: %+v", chunk.Metadata)
+		}
+		if chunk.PageContent != strings.Join(lines[start-1:end], "\n") {
+			t.Fatalf("content differs from physical source: %+v", chunk)
+		}
+		if chunk.Metadata["source"] != "sample.go" {
+			t.Fatalf("source replaced by directive: %+v", chunk.Metadata)
+		}
+		reconstructed = append(reconstructed, chunk.PageContent)
+	}
+	if strings.Join(reconstructed, "\n") != code {
+		t.Fatal("source omitted or duplicated")
+	}
+	functions := chunksOfType(chunks, "function")
+	if len(functions) != 2 || functions[0].Metadata["end_line"] != 3 || functions[1].Metadata["end_line"] != 6 {
+		t.Fatalf("wrong declaration positions: %+v", functions)
 	}
 }
 
@@ -65,6 +96,7 @@ func TestCodeSplitter_PreservesSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SplitDocuments returned error: %v", err)
 	}
+	chunks = chunksOfType(chunks, "function")
 	if len(chunks) != 2 {
 		t.Fatalf("len(chunks) = %d, want 2", len(chunks))
 	}
@@ -130,6 +162,7 @@ func TestCodeSplitter_MetadataValueIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SplitDocuments returned error: %v", err)
 	}
+	chunks = chunksOfType(chunks, "function")
 	if len(chunks) != 2 {
 		t.Fatalf("len(chunks) = %d, want 2", len(chunks))
 	}
@@ -227,6 +260,7 @@ func TestCodeSplitter_LargeFunctionSplit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SplitDocuments returned error: %v", err)
 	}
+	chunks = chunksOfType(chunks, "function")
 	if len(chunks) < 2 {
 		t.Fatalf("len(chunks) = %d, want at least 2", len(chunks))
 	}
@@ -247,6 +281,116 @@ func TestCodeSplitter_LargeFunctionSplit(t *testing.T) {
 		if _, ok := chunk.Metadata["end_line"]; !ok {
 			t.Fatalf("missing end_line in metadata: %#v", chunk.Metadata)
 		}
+	}
+}
+
+func chunksOfType(chunks []schema.Document, chunkType string) []schema.Document {
+	var selected []schema.Document
+	for _, chunk := range chunks {
+		if chunk.Metadata["chunk_type"] == chunkType {
+			selected = append(selected, chunk)
+		}
+	}
+	return selected
+}
+
+func TestCodeSplitter_IncludesAllDeclarations(t *testing.T) {
+	doc := schema.Document{PageContent: strings.Join([]string{
+		"// Package demo explains the example.", "package demo", "", "import \"fmt\"", "",
+		"// Options describes configuration.", "type Options struct {", "    Enabled bool", "}", "",
+		"const Default = 1", "var Current = Options{}", "func Show() { fmt.Println(Current) }",
+	}, "\n"), Metadata: map[string]any{"source": "demo.go"}}
+	chunks, err := NewCodeSplitter().SplitDocuments([]schema.Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"file", "import", "type", "const", "var", "function"} {
+		if len(chunksOfType(chunks, kind)) == 0 {
+			t.Errorf("missing %s chunk", kind)
+		}
+	}
+	lines := strings.Split(doc.PageContent, "\n")
+	covered := make(map[int]bool)
+	for _, chunk := range chunks {
+		start, end := metadataInt(chunk.Metadata["start_line"]), metadataInt(chunk.Metadata["end_line"])
+		if chunk.PageContent != strings.Join(lines[start-1:end], "\n") {
+			t.Fatalf("content does not match source range %d-%d: %q", start, end, chunk.PageContent)
+		}
+		for line := start; line <= end; line++ {
+			covered[line] = true
+		}
+	}
+	for i, line := range lines {
+		if strings.TrimSpace(line) != "" && !covered[i+1] {
+			t.Errorf("source line %d was omitted", i+1)
+		}
+	}
+}
+
+func TestCodeSplitter_PackageOnlyAndInvalidConfiguration(t *testing.T) {
+	chunks, err := NewCodeSplitter().SplitDocuments([]schema.Document{{PageContent: "package demo"}})
+	if err != nil || len(chunks) != 1 || chunks[0].PageContent != "package demo" {
+		t.Fatalf("package-only source: chunks=%v err=%v", chunks, err)
+	}
+	for _, maxLines := range []int{0, -1} {
+		_, err := (&CodeSplitter{MaxLines: maxLines}).SplitDocuments([]schema.Document{{PageContent: "invalid source"}})
+		if err == nil {
+			t.Fatalf("expected error for MaxLines=%d", maxLines)
+		}
+	}
+}
+
+func TestCodeSplitter_LongCommentAndTrailingLinesArePreserved(t *testing.T) {
+	lines := []string{"package demo", ""}
+	for i := 0; i < 9; i++ {
+		lines = append(lines, "// comment")
+	}
+	lines = append(lines, "func Long() {", "    if true {", "        println(1)", "    }", "    println(2)", "}")
+	doc := schema.Document{PageContent: strings.Join(lines, "\n")}
+	chunks, err := (&CodeSplitter{MaxLines: 4, MinLines: 3}).SplitDocuments([]schema.Document{doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var covered []int
+	for _, chunk := range chunksOfType(chunks, "function") {
+		start, end := metadataInt(chunk.Metadata["start_line"]), metadataInt(chunk.Metadata["end_line"])
+		if end-start+1 > 4 {
+			t.Fatalf("chunk exceeds line limit: %d-%d", start, end)
+		}
+		if chunk.PageContent != strings.Join(lines[start-1:end], "\n") {
+			t.Fatalf("duplicate or fabricated lines in %d-%d", start, end)
+		}
+		for i := start; i <= end; i++ {
+			covered = append(covered, i)
+		}
+	}
+	if len(covered) != len(lines)-2 {
+		t.Fatalf("covered %d function lines, want %d", len(covered), len(lines)-2)
+	}
+	for i, line := range covered {
+		if line != i+3 {
+			t.Fatalf("function lines missing or duplicated: %v", covered)
+		}
+	}
+}
+
+func TestCodeSplitter_RespectsUTF8ByteLimit(t *testing.T) {
+	line := "// " + strings.Repeat("码", 12000)
+	chunks, err := (&CodeSplitter{MaxLines: 5, MinLines: 1}).SplitDocuments([]schema.Document{{PageContent: "package demo\n" + line + "\n" + line}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chunks) < 2 {
+		t.Fatal("UTF-8 source was not split at the byte limit")
+	}
+	for _, chunk := range chunks {
+		if len(chunk.PageContent) > maxLenContent {
+			t.Fatalf("chunk has %d bytes", len(chunk.PageContent))
+		}
+	}
+	_, err = NewCodeSplitter().SplitDocuments([]schema.Document{{PageContent: "package demo\n// " + strings.Repeat("x", maxLenContent)}})
+	if err == nil {
+		t.Fatal("expected oversized single line to produce an actionable error")
 	}
 }
 

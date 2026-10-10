@@ -1,10 +1,34 @@
 package ai
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
+
+func TestScanCodeRejectsUnreadableSubdirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires POSIX directory permissions")
+	}
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "readable.go"), "package sample\n")
+	blocked := filepath.Join(root, "blocked")
+	writeTestFile(t, filepath.Join(blocked, "source.go"), "package sample\n")
+	if err := os.Chmod(blocked, 0000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(blocked, 0700) })
+	if _, err := os.ReadDir(blocked); err == nil {
+		t.Skip("requires non-privileged user")
+	}
+	docs, err := ScanCode(root)
+	if !errors.Is(err, fs.ErrPermission) || len(docs) != 0 {
+		t.Fatalf("got %d docs, error=%v; incomplete sources must not reach index replacement", len(docs), err)
+	}
+}
 
 func TestScanCode_FilePath(t *testing.T) {
 	root := t.TempDir()
@@ -22,7 +46,7 @@ func TestScanCode_FilePath(t *testing.T) {
 	if docs[0].PageContent != "package main\n\nfunc main() {}\n" {
 		t.Fatalf("PageContent = %q", docs[0].PageContent)
 	}
-	assertMetadata(t, docs[0].Metadata, filePath, ".", "main.go")
+	assertMetadata(t, docs[0].Metadata, "main.go", "main.go", "main.go")
 }
 
 func TestScanCode_Directory(t *testing.T) {
@@ -84,7 +108,7 @@ func TestScanCode_SkipsIgnoredDirs(t *testing.T) {
 		t.Fatalf("len(docs) = %d, want 1", len(docs))
 	}
 
-	assertMetadata(t, docs[0].Metadata, filepath.Join(root, "main.go"), "main.go", "main.go")
+	assertMetadata(t, docs[0].Metadata, "main.go", "main.go", "main.go")
 }
 
 func TestScanCode_NonExistentPath(t *testing.T) {

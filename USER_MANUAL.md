@@ -1,1051 +1,187 @@
-# GoSource-Insight 使用文档
+# GoSource-Insight 使用手册
 
-## 目录
+本项目提供 `go-ai-insight` CLI、HTTP API 和 Web 工作台，使用同一套源码扫描、静态分析、Ollama 代码索引及问答能力。CLI 默认部署保留；API/Web 通过独立模式启动。上传、Git 导入和外部模型供应商 API 暂列 [TODO](docs/TODO.md)。
 
-1. [项目概述](#项目概述)
-2. [项目结构](#项目结构)
-3. [文件说明](#文件说明)
-4. [快速开始](#快速开始)
-5. [命令详解](#命令详解)
-6. [使用示例](#使用示例)
-7. [配置说明](#配置说明)
-8. [输出格式](#输出格式)
-9. [常见问题](#常见问题)
-10. [开发指南](#开发指南)
+## 1. 扫描和静态分析
 
----
-
-## 项目概述
-
-GoSource-Insight 是一个基于 Go 语言开发的代码分析和测试工具，提供以下功能：
-
-- **代码复杂度分析** - 识别过于复杂的函数
-- **安全漏洞扫描** - 检测常见安全问题
-- **Bug 检测** - 识别常见编程错误
-- **单元测试生成** - 自动生成 Table-driven 测试代码
-- **命令行接口** - 统一的 CLI 工具
-
----
-
-## 项目结构
-
-```
-go-ai-study/
-├── cmd/
-│   └── main.go                  # 主程序入口
-├── internal/
-│   ├── cli/                     # CLI 命令行工具
-│   │   ├── cli.go              # CLI 核心结构
-│   │   ├── commands/           # 命令实现
-│   │   │   ├── command.go      # 命令接口定义
-│   │   │   ├── analyze.go      # 分析命令
-│   │   │   ├── test.go         # 测试生成命令
-│   │   │   ├── security.go     # 安全扫描命令
-│   │   │   ├── bug.go          # Bug 检测命令
-│   │   │   ├── complexity.go   # 复杂度分析命令
-│   │   │   ├── scan.go         # 扫描命令（未实现）
-│   │   │   └── list.go         # 列出命令
-│   │   └── output/             # 输出格式化
-│   │       ├── formatter.go    # 格式化接口
-│   │       ├── json.go         # JSON 格式化器
-│   │       └── text.go         # 文本格式化器
-│   ├── config/                  # 配置管理
-│   │   └── config.go           # 配置加载和保存
-│   └── tools/                   # 分析工具实现
-│       ├── base_tool.go        # 工具基础实现
-│       ├── tool.go             # 工具接口定义
-│       ├── tool_manager.go     # 工具管理器
-│       ├── tool_manager_test.go # 工具管理器测试
-│       ├── logger.go           # 日志系统
-│       ├── errors.go           # 错误定义
-│       ├── complexity_analyzer.go      # 复杂度分析器
-│       ├── complexity_analyzer_test.go # 复杂度分析器测试
-│       ├── security_scanner.go         # 安全扫描器
-│       ├── security_scanner_test.go    # 安全扫描器测试
-│       ├── bug_detector.go             # Bug 检测器
-│       ├── bug_detector_test.go        # Bug 检测器测试
-│       ├── test_generator.go            # 测试生成器
-│       └── test_generator_test.go       # 测试生成器测试
-├── config/
-│   └── config.json              # 默认配置文件
-├── memory/
-│   └── *.md                    # 学习记录
-├── README.md                    # 项目说明
-├── CLI_README.md                # CLI 使用文档
-├── go.mod                       # Go 模块定义
-├── go.sum                       # Go 依赖锁定
-└── docker-compose.yml           # Docker 编排配置
-```
-
----
-
-## 文件说明
-
-### 主程序
-
-#### `cmd/main.go`
-- **作用**: 程序的主入口点
-- **功能**: 解析命令行参数，创建 CLI 实例，执行命令
-- **关键代码**:
-  ```go
-  func main() {
-      // 解析全局参数
-      // 创建 CLI
-      // 执行命令
-  }
-  ```
-
-### CLI 核心
-
-#### `internal/cli/cli.go`
-- **作用**: CLI 核心结构，管理所有命令
-- **功能**:
-  - 创建 ToolManager
-  - 注册所有工具和命令
-  - 执行用户命令
-  - 显示帮助信息
-- **关键结构**:
-  ```go
-  type CLI struct {
-      toolManager    *tools.ToolManager
-      commandRegistry *commands.CommandRegistry
-      config         *config.Config
-      formatter      output.Formatter
-  }
-  ```
-
-#### `internal/cli/commands/command.go`
-- **作用**: 定义命令接口和命令注册表
-- **功能**:
-  - 定义 `Command` 接口
-  - 提供命令注册功能
-  - 列出所有已注册命令
-- **关键接口**:
-  ```go
-  type Command interface {
-      Name() string
-      Description() string
-      Run(ctx context.Context, args []string, formatter output.Formatter) error
-  }
-  ```
-
-### 命令实现
-
-#### `internal/cli/commands/analyze.go`
-- **作用**: 分析命令，调用多个工具进行综合分析
-- **功能**: 执行复杂度分析（可扩展其他分析）
-- **使用**: `go-ai-insight analyze <file>`
-- **输出**: 分析结果（文本或 JSON）
-
-#### `internal/cli/commands/test.go`
-- **作用**: 测试生成命令，调用测试生成器
-- **功能**: 生成 Table-driven 单元测试
-- **使用**: `go-ai-insight test <file>`
-- **输出**: 生成的测试文件路径
-
-#### `internal/cli/commands/security.go`
-- **作用**: 安全扫描命令，调用安全扫描器
-- **功能**: 检测安全漏洞
-- **使用**: `go-ai-insight security <file>`
-- **输出**: 安全报告
-
-#### `internal/cli/commands/bug.go`
-- **作用**: Bug 检测命令，调用 Bug 检测器
-- **功能**: 识别常见编程错误
-- **使用**: `go-ai-insight bug <file>`
-- **输出**: Bug 报告
-
-#### `internal/cli/commands/complexity.go`
-- **作用**: 复杂度分析命令，调用复杂度分析器
-- **功能**: 分析代码圈复杂度
-- **使用**: `go-ai-insight complexity <file>`
-- **输出**: 复杂度报告
-
-#### `internal/cli/commands/scan.go`
-- **作用**: 扫描命令，将代码存储到向量数据库
-- **功能**: 代码扫描和存储（暂未实现）
-- **使用**: `go-ai-insight scan <path>`
-
-#### `internal/cli/commands/list.go`
-- **作用**: 列出所有可用命令
-- **功能**: 显示命令名称和描述
-- **使用**: `go-ai-insight list`
-
-### 输出格式化
-
-#### `internal/cli/output/formatter.go`
-- **作用**: 定义输出格式化接口
-- **功能**:
-  - 定义 `Formatter` 接口
-  - 定义格式化选项
-- **关键接口**:
-  ```go
-  type Formatter interface {
-      Format(result string) string
-  }
-  ```
-
-#### `internal/cli/output/json.go`
-- **作用**: JSON 格式化器
-- **功能**: 将结果格式化为 JSON
-- **使用**: `-f json`
-
-#### `internal/cli/output/text.go`
-- **作用**: 文本格式化器
-- **功能**: 将结果格式化为易读的纯文本
-- **使用**: `-f text`（默认）
-
-### 配置管理
-
-#### `internal/config/config.go`
-- **作用**: 配置加载和保存
-- **功能**:
-  - 从文件加载配置
-  - 从环境变量加载配置
-  - 保存配置到文件
-- **配置项**:
-  ```go
-  type Config struct {
-      DefaultOutput  string
-      DefaultFormat  string
-      Verbose        bool
-      OllamaEndpoint string
-      MilvusEndpoint string
-  }
-  ```
-
-### 分析工具
-
-#### `internal/tools/base_tool.go`
-- **作用**: 工具的基础实现
-- **功能**: 提供 Tool 接口的基础功能
-- **关键方法**: `Name()`, `Description()`, `Validate()`
-
-#### `internal/tools/tool.go`
-- **作用**: 定义工具接口
-- **功能**:
-  - 定义 `Tool` 接口
-  - 定义 `ToolResult` 结构
-- **关键接口**:
-  ```go
-  type Tool interface {
-      Name() string
-      Description() string
-      InputType() reflect.Type
-      Validate(input any) error
-      Run(ctx context.Context, input any) (string, error)
-  }
-  ```
-
-#### `internal/tools/tool_manager.go`
-- **作用**: 工具管理器，统一管理所有工具
-- **功能**:
-  - 注册工具
-  - 获取工具
-  - 执行工具（带超时和重试）
-  - 列出所有工具
-- **关键方法**: `Register()`, `Get()`, `Run()`, `List()`
-
-#### `internal/tools/complexity_analyzer.go`
-- **作用**: 代码复杂度分析器
-- **功能**:
-  - 计算圈复杂度
-  - 识别复杂函数
-  - 提供重构建议
-- **指标**:
-  - 圈复杂度（Cyclomatic Complexity）
-  - 函数行数
-  - 问题列表
-
-#### `internal/tools/security_scanner.go`
-- **作用**: 安全漏洞扫描器
-- **功能**:
-  - 检测硬编码密钥
-  - 检测 SQL 注入风险
-  - 检测 XSS 漏洞
-  - 检测不安全的随机数生成
-- **扫描规则**:
-  - 硬编码密钥
-  - SQL 注入
-  - 命令注入
-  - XSS
-  - 不安全的随机数
-  - 不安全的文件操作
-  - 不安全的 HTTP 请求
-
-#### `internal/tools/bug_detector.go`
-- **作用**: Bug 检测器
-- **功能**:
-  - 检测空指针解引用
-  - 检测资源泄漏
-  - 检测整数溢出
-  - 检测字符串比较错误
-- **检测类型**:
-  - Null Safety
-  - Resource Management
-  - Error Handling
-  - Logic Errors
-
-#### `internal/tools/test_generator.go`
-- **作用**: 单元测试生成器
-- **功能**:
-  - 解析函数签名
-  - 生成 Table-driven 测试代码
-  - 生成 Mock 建议
-  - 生成覆盖率报告
-- **测试模式**:
-  - `basic` - 基本测试
-  - `table-driven` - 表驱动测试（推荐）
-  - `mock` - Mock 测试
-
----
-
-## 快速开始
-
-### 1. 编译程序
+安装 Go 1.25.5 或兼容工具链后，在项目根目录运行：
 
 ```bash
-cd /mnt/f/go-ai-study
-go build -o go-ai-insight ./cmd
+go run ./cmd help
+go run ./cmd scan ./internal
+go run ./cmd analyze ./internal
 ```
 
-### 2. 查看帮助
+- `scan PATH` 发现 Go 文件，统计生产/测试文件数、总行数和跳过目录。
+- `analyze PATH` 对生产 Go 文件执行复杂度、安全风险和常见 Bug 规则，默认不分析 `_test.go`。
+- 两条命令可接受单文件或目录，不依赖 Ollama 或 Milvus。
+
+扫描过程跳过符号链接；入口本身是符号链接时返回错误。默认忽略 `.git`、`vendor`、`node_modules`、`dist`、`build`，以及 IDE / agent 工具目录 `.idea`、`.vscode`、`.hermes`、`.qoder`、`.codex`。
+
+规则命中是需要进一步检查的线索，不代表已确认缺陷。单项检查可使用 `complexity FILE`、`security FILE`、`bug FILE`；`test FILE` 当前仅生成需要手动完善的测试骨架。
+
+## 2. 一键准备问答环境
+
+先启动 Docker 引擎，确认 Docker Compose V2 可用，并使用 Linux 容器。首次执行需联网下载镜像及模型，为模型权重和向量数据库预留足够资源。
+
+PowerShell：
+
+```powershell
+./scripts/deploy.ps1
+```
+
+Linux / macOS：
 
 ```bash
-./go-ai-insight
+bash scripts/deploy.sh
 ```
 
-**理想输出**:
-```
-go-ai-insight - Go 代码分析和测试工具
+部署脚本执行以下流程：
 
-使用:
-  go-ai-insight <command> [options]
+1. 检查 Docker 和 Compose 配置。
+2. 构建统一 CLI 镜像，启动并等待 Ollama、Milvus 健康。
+3. 通过一次性 `models` 服务准备 `bge-m3:latest` 和 `llama3:latest`，复用已安装模型，仅下载缺失模型。
+4. 执行 `doctor` 检查模型、实际向量维度和 Milvus 连接，成功后提示就绪。
 
-命令:
-  scan        扫描代码并存储
-  analyze     分析代码
-  test        生成测试
-  security    安全扫描
-  bug         Bug 检测
-  complexity  复杂度分析
-  list        列出所有可用工具
+脚本每一步失败都会返回非零状态；修复问题后可重新运行。重复执行时不会为已安装模型联网检查更新，最后仍由 `doctor` 校验实际模型和服务。`doctor` 不创建源码索引。默认使用 CPU，依赖服务不发布宿主机端口。
 
-全局选项:
-  -c, --config <file>       配置文件路径
-  -f, --format <format>     输出格式 (json|text)
-  -o, --output <file>       输出文件路径
-  -v, --verbose             详细输出
-  --version                 显示版本信息
+Milvus 使用官方单容器方案，在容器内运行内嵌 etcd 和本地存储。模型及数据库使用命名卷，停止服务后保留数据。部署脚本不创建 `.env` 或修改已有配置；本地 `.env` 仅按需用于参数覆盖，并已被忽略。
 
-日志选项:
-  --log-level <level>       日志级别 (debug|info|warn|error)
-  --log-format <format>     日志格式 (text|json)
-  --log-output <output>     日志输出 (stdout|stderr|file)
-  --log-file <path>         日志文件路径 (当 log-output=file 时使用)
-```
+## 3. 索引源码并问答
 
-### 3. 列出所有工具
+部署成功后运行：
 
 ```bash
-./go-ai-insight list
+docker compose run --rm insight scan /workspace
+docker compose run --rm insight analyze /workspace
+docker compose run --rm insight index --collection example_project /workspace
+docker compose run --rm insight ask --collection example_project "源码扫描和静态分析如何衔接？"
 ```
 
-**理想输出**:
-```
-可用命令:
-  scan         扫描代码并存储到向量数据库
-  list         列出所有可用工具
-  analyze      分析代码并提供智能建议
-  test         生成单元测试
-  security     安全漏洞扫描
-  bug          常见 Bug 检测
-  complexity   代码复杂度分析
-```
+`insight` 是运行后退出的 CLI，默认命令为 `help`。`/workspace` 默认只读挂载当前项目。索引切块覆盖完整 Go 声明，包括函数、方法、类型（结构体及接口）、常量、变量、import，并保留包声明和注释。超长内容继续拆分，解析失败时回退到按源码行分块。
 
----
+首次整库 `index` 的耗时取决于源码规模、模型和硬件，CPU 运行时可能较长。CLI 等待期间仍可能在生成向量；收到索引摘要且退出码为 0 才表示成功。可按 Ctrl+C 取消，取消或失败后按需重新执行索引。
 
-## 命令详解
+一个 collection 对应一个代码库。不同项目使用不同的 `--collection`，索引与问答必须选择同名 collection。源码修改或删除后重新执行 `index`。更新采用独立快照，验证成功后切换内部查询别名；同一 collection 不要并发索引或在更新过程中问答。
 
-### analyze - 分析命令
+### 索引数据保护与恢复
 
-**语法**: `go-ai-insight analyze <file> [options]`
+每次更新分批写入新的物理 collection，完成刷新、向量索引、加载和条数校验后，才切换查询入口。发布前失败时，旧索引保持可用，并尝试清理未发布的新快照；清理失败会明确报错。发布请求超时会重新确认别名是否已切换；仍无法确认时保留新旧数据，不删除可能已经生效的新快照。
 
-**描述**: 分析代码并提供智能建议
+配置中的 collection 名称保持不变。内部入口名为 `gsi_active_<项目名哈希>`，快照名为 `gsi_snapshot_<项目名哈希>_<随机标识>`；哈希为 collection 名称的 SHA-256 前 16 字节的十六进制表示。没有内部别名时，仍可读取原来的同名 collection。首次成功更新后也保留原 collection。
 
-**参数**:
-- `<file>` - 要分析的 Go 文件路径
+历史快照保存在 Milvus 数据卷中，仅卸载内存，不自动删除。历史列表、回滚和清理命令暂列 TODO。需要手工恢复时，先停止该 collection 的索引和问答，用 Milvus 管理接口核对旧快照的 schema、维度、项目标记及内容，加载目标快照后，将内部别名重新指向它。若恢复首次迁移前的原 collection，则移除内部别名，使读取回退到原 collection。保留已确认可用的数据后再清理其他快照，勿删除正在使用的快照或数据卷；磁盘容量应覆盖新旧索引同时存在的开销。
 
-**选项**:
-- `-f, --format` - 输出格式（json|text）
-- `-v, --verbose` - 详细输出
+读取源码或目录失败会中止索引，避免将无法读取的文件当成已删除。代码分块、复杂度及 Bug/安全问题使用实际文件的物理行号，忽略 `//line` 提供的映射位置。
 
-**使用示例**:
-```bash
-./go-ai-insight analyze ./mycode.go
-./go-ai-insight analyze ./mycode.go -f json
-./go-ai-insight analyze ./mycode.go -v
-```
+资源关闭检测会检查直接关闭、常见的 defer 关闭、变量遮蔽及重新赋值，不要求调用方关闭 `os.WriteFile` 的内部句柄。它仍是局部语法分析：跨函数转移资源所有权等复杂写法可能保留告警，需结合源码判断。硬编码凭据检测包含赋值语句，以及包级、局部和分组的 const/var 声明。
 
-**理想输出（文本格式）**:
-```
-{
-  "file": "",
-  "total": 25,
-  "functions": [
-    {
-      "name": "main",
-      "line": 10,
-      "complexity": 3,
-      "lines": 15,
-      "issues": null
-    },
-    ...
-  ],
-  "summary": "代码质量良好"
-}
-```
-
----
-
-### test - 测试生成命令
-
-**语法**: `go-ai-insight test <file> [options]`
-
-**描述**: 为 Go 代码自动生成单元测试
-
-**参数**:
-- `<file>` - 要生成测试的 Go 文件路径
-
-**选项**:
-- `-f, --format` - 输出格式（json|text）
-- `-v, --verbose` - 详细输出
-
-**使用示例**:
-```bash
-./go-ai-insight test ./mycode.go
-./go-ai-insight test ./mycode.go -f json
-```
-
-**理想输出**:
-```
-[SUCCESS] 测试生成成功
-
-生成的测试文件数: 1
-测试用例总数: 3
-
-文件:
-   - ./mycode_test.go
-```
-
-**生成的测试文件示例**:
-```go
-func TestAdd(t *testing.T) {
-	type args struct {
-		a int
-		b int
-	}
-	tests := []struct {
-		name string
-		args args
-		want int
-	}{
-		{
-			name: "TODO: 测试用例描述",
-			args: args{TODO_a, TODO_b},
-			want: TODO_int,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := Add(tt.args.a, tt.args.b); got != tt.want {
-				t.Errorf("got %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-```
-
----
-
-### security - 安全扫描命令
-
-**语法**: `go-ai-insight security <file> [options]`
-
-**描述**: 扫描代码中的安全漏洞
-
-**参数**:
-- `<file>` - 要扫描的 Go 文件路径
-
-**选项**:
-- `-f, --format` - 输出格式（json|text）
-- `-v, --verbose` - 详细输出
-
-**使用示例**:
-```bash
-./go-ai-insight security ./mycode.go
-./go-ai-insight security ./mycode.go -f json
-```
-
-**理想输出（无安全问题）**:
-```
-{
-  "file": "",
-  "total": 0,
-  "issues": [],
-  "summary": "✅ 未检测到安全问题",
-  "statistics": {
-    "total_issues": 0,
-    "critical": 0,
-    "high": 0,
-    "medium": 0,
-    "low": 0
-  }
-}
-```
-
-**理想输出（有安全问题）**:
-```
-{
-  "file": "",
-  "total": 2,
-  "issues": [
-    {
-      "rule": "hardcoded-secret",
-      "severity": "high",
-      "message": "检测到硬编码密钥",
-      "line": 10,
-      "suggestion": "使用环境变量或配置文件"
-    },
-    ...
-  ],
-  "summary": "⚠️ 检测到 2 个安全问题"
-}
-```
-
----
-
-### bug - Bug 检测命令
-
-**语法**: `go-ai-insight bug <file> [options]`
-
-**描述**: 检测代码中的常见 Bug
-
-**参数**:
-- `<file>` - 要检测的 Go 文件路径
-
-**选项**:
-- `-f, --format` - 输出格式（json|text）
-- `-v, --verbose` - 详细输出
-
-**使用示例**:
-```bash
-./go-ai-insight bug ./mycode.go
-./go-ai-insight bug ./mycode.go -f json
-```
-
-**理想输出**:
-```
-{
-  "language": "go",
-  "status": "success",
-  "total_files": 1,
-  "analyzed_files": 1,
-  "total": 5,
-  "bugs": [
-    {
-      "id": "bug-001",
-      "rule_id": "B101",
-      "severity": "Medium",
-      "category": "Null Safety",
-      "description": "对可能为 nil 的指针调用方法",
-      "line": 15,
-      "fix_suggestion": "检查 nil"
-    },
-    ...
-  ]
-}
-```
-
----
-
-### complexity - 复杂度分析命令
-
-**语法**: `go-ai-insight complexity <file> [options]`
-
-**描述**: 分析代码的圈复杂度
-
-**参数**:
-- `<file>` - 要分析的 Go 文件路径
-
-**选项**:
-- `-f, --format` - 输出格式（json|text）
-- `-v, --verbose` - 详细输出
-
-**使用示例**:
-```bash
-./go-ai-insight complexity ./mycode.go
-./go-ai-insight complexity ./mycode.go -f json
-./go-ai-insight complexity ./mycode.go -v
-```
-
-**理想输出**:
-```
-{
-  "file": "",
-  "total": 25,
-  "functions": [
-    {
-      "name": "main",
-      "line": 10,
-      "complexity": 3,
-      "lines": 15,
-      "issues": null
-    },
-    {
-      "name": "complexFunction",
-      "line": 30,
-      "complexity": 15,
-      "lines": 60,
-      "issues": [
-        "⚠️ 圈复杂度偏高（>10），可能需要重构",
-        "📏 函数较长（>50行），可考虑拆分"
-      ]
-    }
-  ],
-  "summary": {
-    "total_functions": 2,
-    "high_complexity": 1,
-    "medium_complexity": 1,
-    "low_complexity": 0
-  }
-}
-```
-
----
-
-### list - 列出命令
-
-**语法**: `go-ai-insight list`
-
-**描述**: 列出所有可用命令
-
-**使用示例**:
-```bash
-./go-ai-insight list
-```
-
-**理想输出**:
-```
-可用命令:
-  scan         扫描代码并存储到向量数据库
-  analyze      分析代码并提供智能建议
-  test         生成单元测试
-  security     安全漏洞扫描
-  bug          常见 Bug 检测
-  complexity   代码复杂度分析
-  list         列出所有可用工具
-```
-
----
-
-## 使用示例
-
-### 示例 1：分析单个文件
+按文件限定检索时，`--file` 使用相对于索引根目录的路径：
 
 ```bash
-# 编译程序
-go build -o go-ai-insight ./cmd
-
-# 分析文件
-./go-ai-insight complexity internal/tools/complexity_analyzer.go
+docker compose run --rm insight ask --collection example_project --file internal/ai/rag_service.go "索引是如何更新的？"
 ```
 
-### 示例 2：生成测试
+问答返回回答和源码依据，索引元数据仅保存代码库相对路径。没有相关源码时返回明确说明；应结合返回的来源核对模型回答。
+
+分析其他目录时，通过本地环境变量选择挂载源。例如，在项目根目录存在通用示例目录 `sample-project` 时：
+
+```powershell
+$env:SOURCE_DIR = './sample-project'
+docker compose run --rm insight index --collection sample_project /workspace
+```
 
 ```bash
-# 生成测试
-./go-ai-insight test internal/tools/test_generator.go
-
-# 查看生成的测试文件
-cat internal/tools/test_generator_test.go
+SOURCE_DIR=./sample-project docker compose run --rm insight index --collection sample_project /workspace
 ```
 
-### 示例 3：安全扫描
+相对挂载路径以 Compose 文件所在目录为基准。之后扫描或索引该项目时使用同样的挂载源；问答直接读取向量库。
+
+若使用独立部署的 Ollama 和 Milvus，也可运行本地 CLI：
 
 ```bash
-# 安全扫描
-./go-ai-insight security internal/tools/complexity_analyzer.go
-
-# 查看详细输出
-./go-ai-insight security internal/tools/complexity_analyzer.go -v
+go run ./cmd doctor
+go run ./cmd index --collection example_project ./internal
+go run ./cmd ask --collection example_project --file ai/rag_service.go "如何检索源码？"
 ```
 
-### 示例 4：批量分析
+此例索引根目录为 `./internal`，因此文件过滤路径为 `ai/rag_service.go`。
+
+## 4. 配置与隐私
+
+配置优先级为：内置默认值 → `-c FILE` 显式配置文件 → 环境变量 → 对应命令行选项。不指定配置文件时使用内置默认值；`config/config.json` 是通用示例。
+
+所有模型及检索参数使用 `GO_AI_INSIGHT_` 前缀，包括：
+
+- `OLLAMA_ENDPOINT`、`MILVUS_ENDPOINT`
+- `EMBEDDING_MODEL`、`CHAT_MODEL`、`COLLECTION`
+- `VECTOR_DIM`、`TOP_K`、`CHUNK_MAX_LINES`、`CHUNK_MIN_LINES`
+- `TIMEOUT_SECONDS`
+
+完整默认值见 [README 的通用配置](README.md#通用配置)。Compose 使用容器服务名连接后端，并支持在本地 `.env` 或调用者环境中覆盖模型和检索参数。更换模型后重新执行部署脚本；更换向量模型时匹配其实际向量维度并重新索引。
+
+真实地址、个人绝对路径、账号或凭据仅通过本地环境或已忽略的 `config/config.local.json` 覆盖，不写入仓库、文档或通用示例。不要提交本地 `.env`。部署脚本保留已有配置，源码索引不保存个人目录路径。
+
+## 5. 报告与错误
+
+全局选项放在命令前；`index` / `ask` 的命令选项放在命令后。
 
 ```bash
-# 分析多个文件
-for file in internal/tools/*.go; do
-    echo "=== 分析 $file ==="
-    ./go-ai-insight complexity "$file" | head -10
-done
+go run ./cmd -f json scan ./internal
+go run ./cmd -f json -o analysis.json analyze ./internal
+go run ./cmd -c config/config.json index --collection example_project ./internal
 ```
 
-### 示例 5：生成 JSON 报告
+JSON 报告结构为 `{"success":true,"result":{...}}`，`result` 是对象，直接解析即可。日志默认写入 stderr，报告写入 stdout；`-o FILE` 导出报告文件。成功返回 0，参数、配置或执行失败返回非零状态，错误写入 stderr。
+
+容器源码挂载只读，导出报告可由宿主机接收 stdout：
 
 ```bash
-# 生成 JSON 报告
-./go-ai-insight complexity internal/tools/test_generator.go -f json > report.json
+docker compose run --rm -T insight -f json analyze /workspace > analysis.json
 ```
 
-### 示例 6：日志配置
+完整参数和报告字段见 [CLI_README.md](CLI_README.md)。
+
+## 6. 检查和停止
 
 ```bash
-# 使用 JSON 格式日志
-./go-ai-insight --log-format json list
-
-# 使用 debug 级别日志
-./go-ai-insight --log-level debug analyze internal/tools/test_generator.go
-
-# 输出日志到文件
-./go-ai-insight --log-output file --log-file /var/log/insight.log security internal/tools/
-
-# 组合使用
-./go-ai-insight --log-format json --log-level debug --log-file debug.json bug internal/tools/
+docker compose ps
+docker compose run --rm -T insight -f json doctor
+docker compose logs --tail 100 milvus ollama
+docker compose down
 ```
 
-### 示例 7：生产环境配置
+如果 `doctor` 报告模型缺失，重新运行部署脚本准备模型；若维度不匹配，修正向量模型或 `VECTOR_DIM` 后重新索引；连接失败时检查对应服务状态和本地配置。问答无结果时确认 collection、是否已完成索引及 `--file` 路径。
 
-创建生产环境配置文件 `~/.go-ai-insight/config.json`：
-
-```json
-{
-  "default_output": "stdout",
-  "default_format": "json",
-  "verbose": false,
-  "ollama_endpoint": "http://localhost:11434",
-  "milvus_endpoint": "http://localhost:19530",
-  "log_config": {
-    "level": "info",
-    "format": "json",
-    "output": "file",
-    "file_path": "/var/log/go-ai-insight/app.log"
-  }
-}
-```
-
-使用配置文件运行：
+开发验证：
 
 ```bash
-./go-ai-insight analyze internal/tools/
+go test ./internal/... ./cmd/...
+go build -o ./bin/go-ai-insight ./cmd
 ```
 
-# 查看报告
-cat report.json
-```
+Web 工作台可用；外部模型 API、增量索引、索引回滚及其他后续工作见 [docs/TODO.md](docs/TODO.md)。
 
-### 示例 6：组合使用
+## Web 工作台使用
 
-```bash
-# 先分析复杂度，再扫描安全
-./go-ai-insight complexity ./mycode.go && \
-./go-ai-insight security ./mycode.go
+在仓库根目录运行 `./scripts/deploy.ps1 -Mode web` 或 `bash scripts/deploy.sh --mode web`，默认打开 `http://127.0.0.1:3000`。已有模型缓存时添加 `-WithAI` / `--with-ai`，不会下载模型。脚本复用 API 凭据和 PostgreSQL 卷，网页就绪只表示核心可用，不保证 AI 在线。
 
-# 三步分析流程
-./go-ai-insight complexity ./mycode.go && \
-./go-ai-insight security ./mycode.go && \
-./go-ai-insight bug ./mycode.go
-```
+先使用 `./scripts/deploy.ps1 -Mode web -SourceDirectory 'C:\code\project'` 或 `bash scripts/deploy.sh --mode web --source-directory '/workspace/project'` 选已有本地源码目录。注册登录，在 `/workspace` 新建/选择项目，直接填写该根内完整目录或 `.go` 文件路径；无需管理员、所有者/项目 ID 或独立绑定。旧相对 API 调用与项目映射继续兼容。详见 [本地源码目录](docs/SOURCE_BINDINGS.md)。路径属于 API 宿主机授权范围，不能任意读取远程浏览器电脑或其他项目目录。「扫描源码」后「静态分析」，在「分析结果」核对规则线索。AI 已准备好后「建立索引」，确认替换整个项目范围，等待任务完成，再到「源码问答」发送问题并核对相对来源与物理行号。
 
----
+换根/排除项只改变后续源码读取，不自动更新旧索引；需要用户在新范围下明确确认建立索引。未配置映射、越界、链接或不可读目标会给出状态指引；目录部署入口会更新 API/Web 并处理在途任务；底层配置生成本身不重启服务。工具只接受目录根，单文件是目录内操作范围，不会偷偷授权整个父目录。
 
-## 配置说明
+「任务记录」只记录本浏览器、当前账号和项目提交过的任务 ID，轮询服务端状态；当前没有完整服务端任务列表、流式问答或持久会话历史。运行中止可能处于 `canceling`，已发布的索引不回滚。子目录索引会替换整项目范围；中断或发布不确定时先核对索引再重试。问答等待有界，默认模型 300 秒、代理 330 秒、客户端 350 秒，后端 HTTP 写入仍受 300 秒限制。详细操作与配置见 [Web 说明](web/README.md) 和 [部署说明](docs/WEB_DEPLOYMENT.md)。
 
-### 配置文件位置
+## HTTP API 使用
 
-默认配置文件：`~/.go-ai-insight/config.json`
+在仓库根目录运行 `./scripts/deploy.ps1 -Mode api` 或 `bash scripts/deploy.sh --mode api`。这会生成并复用忽略目录 `.runtime/api.env` 中的服务凭据，构建非 root API 镜像，启动持久 PostgreSQL，并等待 `/ready`。默认 API 只绑定主机 `127.0.0.1:8087`；依赖不发布端口。`/health` 反映存活，`/ready` 反映本实例仍接受操作及必需数据库/实例会话状态，不要求 AI 在线。
 
-### 配置项
+已有模型缓存时，添加 `-WithAI` / `--with-ai` 启动并检查 Ollama/Milvus，不下载模型。原 CLI 部署入口仍可用于首次准备模型。API 扫描/静态分析无需 AI；模型配置按需初始化。
 
-| 配置项 | 类型 | 默认值 | 说明 |
-|--------|------|--------|------|
-| `default_output` | string | "stdout" | 默认输出位置 |
-| `default_format` | string | "text" | 默认输出格式 |
-| `verbose` | bool | false | 详细输出 |
-| `ollama_endpoint` | string | "http://localhost:11434" | Ollama 服务地址 |
-| `milvus_endpoint` | string | "http://localhost:19530" | Milvus 服务地址 |
-| `log_config` | object | 见下方 | 日志配置 |
+完整可执行 PowerShell/Bash 示例见 [api/README.md](api/README.md)：选择自己的账号注册、登录，部署时选本地源码目录，创建项目后直接提交该根内完整路径，无需手填所有者/项目 ID。API 只读读取配置范围，不提供上传、Git 拉取或不受控制的主机路径选择。Linux 上容器 UID 10001 需能读取源码及遍历祖先目录。
 
-### 日志配置
+用相对 `target` 或已映射根内的完整目标扫描/提交分析，拿到 `job_id` 后查询 `/api/v1/jobs/:id`。索引同样是异步任务；完成后调用 `ask`，可选相对 `file` 限定来源。任务/来源路径保持相对，内容与物理行号保持原样，读取已发布索引不依赖源码目录仍存在。
 
-`log_config` 对象包含以下字段：
+同项目索引/问答忙时返回 409。索引 `pkg` 会替换整个项目快照，仅留下 `pkg`；再次索引 `.` 才恢复整库。历史快照保留并消耗磁盘，当前没有自动清理。取消排队任务释放容量；运行取消只是请求，确认已发布的索引仍完成且不回滚。重启遗留任务变为 `interrupted`，发布状态不明为 `index_publication_unknown`，两者都可能已发布新快照，不能当成确定未执行。详见 [接口契约](api/CONTRACT.md)。
 
-| 字段 | 类型 | 默认值 | 可选值 | 说明 |
-|------|------|--------|--------|------|
-| `level` | string | "info" | debug, info, warn, error | 日志级别 |
-| `format` | string | "text" | text, json | 日志格式 |
-| `output` | string | "stdout" | stdout, stderr, file | 日志输出目标 |
-| `file_path` | string | "" | - | 日志文件路径（output=file 时必填）|
-
-### 配置文件示例
-
-```json
-{
-  "default_output": "stdout",
-  "default_format": "text",
-  "verbose": false,
-  "ollama_endpoint": "http://localhost:11434",
-  "milvus_endpoint": "http://localhost:19530",
-  "log_config": {
-    "level": "info",
-    "format": "text",
-    "output": "stdout",
-    "file_path": ""
-  }
-}
-```
-
-### 日志级别说明
-
-| 级别 | 数值 | 说明 | 使用场景 |
-|------|------|------|----------|
-| debug | -4 | 最详细的日志 | 开发调试 |
-| info | 0 | 常规信息 | 正常运行 |
-| warn | 4 | 警告信息 | 潜在问题 |
-| error | 8 | 错误信息 | 发生错误 |
-
-### 日志格式
-
-#### Text 格式（默认）
-
-**特点**:
-- 人类可读
-- 简洁直观
-- 适合终端输出
-
-**示例**:
-```
-time=2026-02-06T23:09:24.277+08:00 level=INFO msg=工具注册成功 tool=test_generator enabled=true
-time=2026-02-06T23:09:24.278+08:00 level=INFO msg=工具注册成功 tool=complexity_analyzer enabled=true
-```
-
-#### JSON 格式
-
-**特点**:
-- 机器可读
-- 结构化数据
-- 适合日志分析工具
-
-**示例**:
-```json
-{"time":"2026-02-06T23:09:26.94069409+08:00","level":"INFO","msg":"工具注册成功","tool":"test_generator","enabled":true}
-{"time":"2026-02-06T23:09:26.941612581+08:00","level":"INFO","msg":"工具注册成功","tool":"complexity_analyzer","enabled":true}
-```
-
-### 环境变量
-
-| 变量名 | 说明 |
-|--------|------|
-| `GO_AI_INSIGHT_VERBOSE` | 详细输出开关 |
-| `GO_AI_INSIGHT_FORMAT` | 默认输出格式 |
-| `GO_AI_INSIGHT_LOG_LEVEL` | 日志级别 |
-| `GO_AI_INSIGHT_LOG_FORMAT` | 日志格式 |
-| `GO_AI_INSIGHT_LOG_OUTPUT` | 日志输出 |
-| `GO_AI_INSIGHT_LOG_FILE` | 日志文件路径 |
-
-### 配置优先级
-
-命令行参数 > 环境变量 > 配置文件 > 默认值
-
----
-
-## 输出格式
-
-### 文本格式
-
-**特点**:
-- 简洁易读
-- 使用标签标记（[SUCCESS], [ERROR], [WARNING]）
-- 支持 verbose 模式显示更多信息
-
-**示例**:
-```
-[SUCCESS] 测试生成成功
-
-生成的测试文件数: 1
-测试用例总数: 3
-```
-
-### JSON 格式
-
-**特点**:
-- 机器可读
-- 适合程序解析
-- 包含完整的结构化数据
-
-**示例**:
-```json
-{
-  "success": true,
-  "result": "测试生成成功\n\n生成的测试文件数: 1\n测试用例总数: 3"
-}
-```
-
----
-
-## 常见问题
-
-### Q1: 编译失败怎么办？
-
-**A**: 确保 Go 版本 >= 1.23，并安装所有依赖：
-
-```bash
-go version
-go mod download
-go build -o go-ai-insight ./cmd
-```
-
-### Q2: 如何生成测试？
-
-**A**: 使用 test 命令：
-
-```bash
-./go-ai-insight test ./mycode.go
-```
-
-### Q3: 如何查看详细输出？
-
-**A**: 使用 `-v` 选项：
-
-```bash
-./go-ai-insight complexity ./mycode.go -v
-```
-
-### Q4: 如何保存分析结果？
-
-**A**: 使用 JSON 格式并重定向输出：
-
-```bash
-./go-ai-insight complexity ./mycode.go -f json > report.json
-```
-
-### Q5: 如何分析整个目录？
-
-**A**: 使用循环遍历目录：
-
-```bash
-for file in ./mydir/*.go; do
-    ./go-ai-insight complexity "$file"
-done
-```
-
----
-
-## 开发指南
-
-### 添加新命令
-
-1. 在 `internal/cli/commands/` 创建新的命令文件
-2. 实现 `Command` 接口
-3. 在 `internal/cli/cli.go` 中注册命令
-
-### 添加新工具
-
-1. 在 `internal/tools/` 创建新的工具文件
-2. 实现 `Tool` 接口
-3. 在 `internal/cli/cli.go` 中注册工具
-
-### 运行测试
-
-```bash
-# 运行所有测试
-go test ./internal/tools/ -v
-
-# 运行特定测试
-go test ./internal/tools/ -run TestComplexity -v
-```
-
-### 日志最佳实践
-
-#### 开发环境
-
-使用 debug 级别，输出详细日志：
-
-```bash
-./go-ai-insight --log-level debug --log-format text analyze internal/tools/
-```
-
-#### 测试环境
-
-使用 text 格式，输出到标准错误：
-
-```json
-{
-  "log_config": {
-    "level": "debug",
-    "format": "text",
-    "output": "stderr",
-    "file_path": ""
-  }
-}
-```
-
-#### 生产环境
-
-使用 info 级别，JSON 格式，输出到文件：
-
-```json
-{
-  "log_config": {
-    "level": "info",
-    "format": "json",
-    "output": "file",
-    "file_path": "/var/log/go-ai-insight/app.log"
-  }
-}
-```
-
-#### 日志轮转
-
-对于生产环境，建议使用 `logrotate` 管理日志文件：
-
-```
-/var/log/go-ai-insight/*.log {
-    daily
-    rotate 7
-    compress
-    delaycompress
-    missingok
-    notifempty
-    create 0640 www-data adm
-}
-```
-
-#### 日志分析
-
-使用 JSON 格式日志配合日志分析工具：
-
-```bash
-# 提取错误日志
-grep '"level":"ERROR"' /var/log/go-ai-insight/app.log
-
-# 统计错误数量
-grep -c '"level":"ERROR"' /var/log/go-ai-insight/app.log
-
-# 使用 jq 提取字段
-jq 'select(.level=="ERROR") | .msg' /var/log/go-ai-insight/app.log
-```
-
----
-
-## 版本信息
-
-当前版本：1.0.0
-
-更新日期：2026-02-06
-
----
-
-## 许可证
-
-MIT
+只能运行单 API 实例；PostgreSQL 会话锁阻止第二实例在启动时回收现有任务。更换 JWT 密钥后需要重新登录；数据库凭据必须和持久卷匹配，脚本不自动修改已有密码。只停止服务时使用 API Compose 文件组合的 `stop api postgres`，保留凭据及命名卷，不执行删除数据卷的清理。独立验收需要隔离 PostgreSQL/Milvus，不能用新数据库的相同项目 ID 覆盖已有索引。

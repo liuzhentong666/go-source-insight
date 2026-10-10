@@ -54,7 +54,5 @@ func (c *SecurityCommand) Run(ctx context.Context, args []string, formatter outp
 	}
 
 	// 输出结果
-	fmt.Println(formatter.Format(securityResult.Result))
-
-	return nil
+	return output.Print(formatter, securityResult.Result)
 }

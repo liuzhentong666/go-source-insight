@@ -1,77 +1,96 @@
 
-services:
-  # Go应用服务
-  go-ai-insight:
-    build: .
-    ports:
-      - "8080:8080"
-    environment:
-      - OLLAMA_ENDPOINT=http://ollama:11434
-      - MILVUS_ENDPOINT=http://milvus:19530
-    depends_on:
-      - ollama
-      - milvus
-    restart: unless-stopped
-    volumes:
-      - ./config:/app/config
-      - ./internal:/app/internal
+name: go-source-insight
 
-  # Ollama服务（LLM引擎）
+services:
+  # Invoke with compose run --rm insight <command>; this is a CLI, not an HTTP server.
+  insight:
+    profiles: [cli]
+    build: .
+    image: go-source-insight:local
+    command: [help]
+    environment:
+      GO_AI_INSIGHT_OLLAMA_ENDPOINT: http://ollama:11434
+      GO_AI_INSIGHT_MILVUS_ENDPOINT: milvus:19530
+      GO_AI_INSIGHT_EMBEDDING_MODEL: ${GO_AI_INSIGHT_EMBEDDING_MODEL:-bge-m3:latest}
+      GO_AI_INSIGHT_CHAT_MODEL: ${GO_AI_INSIGHT_CHAT_MODEL:-llama3:latest}
+      GO_AI_INSIGHT_COLLECTION: ${GO_AI_INSIGHT_COLLECTION:-code_segments}
+      GO_AI_INSIGHT_VECTOR_DIM: ${GO_AI_INSIGHT_VECTOR_DIM:-1024}
+      GO_AI_INSIGHT_TOP_K: ${GO_AI_INSIGHT_TOP_K:-3}
+      GO_AI_INSIGHT_CHUNK_MAX_LINES: ${GO_AI_INSIGHT_CHUNK_MAX_LINES:-120}
+      GO_AI_INSIGHT_CHUNK_MIN_LINES: ${GO_AI_INSIGHT_CHUNK_MIN_LINES:-5}
+      GO_AI_INSIGHT_TIMEOUT_SECONDS: ${GO_AI_INSIGHT_TIMEOUT_SECONDS:-300}
+    volumes:
+      - type: bind
+        source: ${SOURCE_DIR:-.}
+        target: /workspace
+        read_only: true
+        bind:
+          create_host_path: false
+
   ollama:
-    image: ollama/ollama:latest
-    ports:
-      - "11434:11434"
+    image: ollama/ollama:0.11.11
     volumes:
       - ollama_data:/root/.ollama
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
-      interval: 30s
+      test: [CMD, ollama, list]
+      interval: 10s
       timeout: 10s
-      retries: 3
+      start_period: 20s
+      retries: 12
 
-  # Milvus服务（向量数据库）
-  etcd:
-    image: quay.io/coreos/etcd:v3.5.0
+  # Explicit one-shot initialization; deploy scripts wait for its exit status.
+  models:
+    profiles: [setup]
+    image: ollama/ollama:0.11.11
+    entrypoint: [/bin/sh, -ec]
+    command:
+      - |
+        for model in "$$GO_AI_INSIGHT_EMBEDDING_MODEL" "$$GO_AI_INSIGHT_CHAT_MODEL"; do
+          if ollama show "$$model" >/dev/null 2>&1; then
+            echo "Using cached model: $$model"
+          else
+            echo "Downloading missing model: $$model"
+            ollama pull "$$model"
+          fi
+        done
+        echo "Models are ready."
     environment:
-      - ETCD_AUTO_COMPACTION_RETENTION_RUNTIME=1h
-    command: etcd --advertise-client-urls http://127.0.0.1:2379 --listen-client-urls http://0.0.0.0:2379
-    volumes:
-      - etcd_data:/etcd-data
-    restart: unless-stopped
-
-  minio:
-    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
-    environment:
-      - MINIO_ACCESS_KEY=minioadmin
-      - MINIO_SECRET_KEY=minioadmin
-    command: server /data
-    volumes:
-      - minio_data:/data
-    restart: unless-stopped
-
-  milvus:
-    image: milvusdb/milvus:v2.3.15
-    command: ["milvus", "run", "standalone"]
-    environment:
-      - ETCD_ENDPOINTS=etcd:2379
-      - MINIO_ADDRESS=minio:9000
-    ports:
-      - "19531:19530"
+      OLLAMA_HOST: http://ollama:11434
+      GO_AI_INSIGHT_EMBEDDING_MODEL: ${GO_AI_INSIGHT_EMBEDDING_MODEL:-bge-m3:latest}
+      GO_AI_INSIGHT_CHAT_MODEL: ${GO_AI_INSIGHT_CHAT_MODEL:-llama3:latest}
     depends_on:
-      - etcd
-      - minio
+      ollama:
+        condition: service_healthy
+
+  # Official standalone mode: embedded etcd and local object storage.
+  milvus:
+    image: milvusdb/milvus:v2.5.27
+    command: [milvus, run, standalone]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      ETCD_USE_EMBED: "true"
+      ETCD_DATA_DIR: /var/lib/milvus/etcd
+      ETCD_CONFIG_PATH: /milvus/configs/embedEtcd.yaml
+      COMMON_STORAGETYPE: local
     volumes:
       - milvus_data:/var/lib/milvus
+      - type: bind
+        source: ./scripts/milvus-embedded-etcd.yaml
+        target: /milvus/configs/embedEtcd.yaml
+        read_only: true
+        bind:
+          create_host_path: false
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:19530/v1/healthz"]
-      interval: 30s
+      test: [CMD, curl, -f, http://localhost:9091/healthz]
+      interval: 10s
       timeout: 10s
-      retries: 3
+      start_period: 90s
+      retries: 24
 
+# Model weights and database state persist across compose down/up.
 volumes:
   ollama_data:
   milvus_data:
-  etcd_data:
-  minio_data:

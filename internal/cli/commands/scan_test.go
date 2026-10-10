@@ -27,8 +27,8 @@ func TestScanCommandScansProjectStructure(t *testing.T) {
 	})
 
 	var envelope struct {
-		Success bool   `json:"success"`
-		Result  string `json:"result"`
+		Success bool            `json:"success"`
+		Result  json.RawMessage `json:"result"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &envelope); err != nil {
 		t.Fatalf("unmarshal formatter envelope: %v\noutput=%s", err, stdout)
@@ -38,7 +38,7 @@ func TestScanCommandScansProjectStructure(t *testing.T) {
 	}
 
 	var result GoFileScanResult
-	if err := json.Unmarshal([]byte(envelope.Result), &result); err != nil {
+	if err := json.Unmarshal(envelope.Result, &result); err != nil {
 		t.Fatalf("unmarshal scan result: %v\nresult=%s", err, envelope.Result)
 	}
 
@@ -74,6 +74,14 @@ func captureStdout(t *testing.T, fn func()) string {
 		t.Fatalf("pipe: %v", err)
 	}
 	os.Stdout = w
+	done := make(chan string, 1)
+	go func() {
+		var buf bytes.Buffer
+		_, _ = io.Copy(&buf, r)
+		_ = r.Close()
+		done <- buf.String()
+	}()
+	defer func() { os.Stdout = old; _ = w.Close() }()
 
 	fn()
 
@@ -82,9 +90,5 @@ func captureStdout(t *testing.T, fn func()) string {
 	}
 	os.Stdout = old
 
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, r); err != nil {
-		t.Fatalf("read stdout: %v", err)
-	}
-	return buf.String()
+	return <-done
 }

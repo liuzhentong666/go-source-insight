@@ -46,6 +46,5 @@ func (c *AnalyzeCommand) Run(ctx context.Context, args []string, formatter outpu
 		return fmt.Errorf("序列化分析结果失败: %w", err)
 	}
 
-	fmt.Println(formatter.Format(string(jsonBytes)))
-	return nil
+	return output.Print(formatter, string(jsonBytes))
 }

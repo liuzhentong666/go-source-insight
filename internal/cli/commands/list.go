@@ -2,40 +2,33 @@ package commands
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
 	"go-ai-study/internal/cli/output"
+	"sort"
 )
 
-// ListCommand 列出所有命令
-type ListCommand struct {
-	registry *CommandRegistry
-}
+type ListCommand struct{ registry *CommandRegistry }
 
-// NewListCommand 创建列出命令
-func NewListCommand(registry *CommandRegistry) *ListCommand {
-	return &ListCommand{
-		registry: registry,
-	}
-}
-
-// Name 命令名称
-func (c *ListCommand) Name() string {
-	return "list"
-}
-
-// Description 命令描述
-func (c *ListCommand) Description() string {
-	return "列出所有可用工具"
-}
-
-// Run 执行命令
+func NewListCommand(registry *CommandRegistry) *ListCommand { return &ListCommand{registry} }
+func (c *ListCommand) Name() string                         { return "list" }
+func (c *ListCommand) Description() string                  { return "列出可用命令" }
 func (c *ListCommand) Run(ctx context.Context, args []string, formatter output.Formatter) error {
-	commands := c.registry.List()
-
-	fmt.Println("可用命令:")
-	for _, cmd := range commands {
-		fmt.Printf("  %-12s %s\n", cmd.Name(), cmd.Description())
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-
-	return nil
+	list := c.registry.List()
+	sort.Slice(list, func(i, j int) bool { return list[i].Name() < list[j].Name() })
+	type item struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	}
+	items := make([]item, 0, len(list))
+	for _, cmd := range list {
+		items = append(items, item{cmd.Name(), cmd.Description()})
+	}
+	data, err := json.MarshalIndent(items, "", "  ")
+	if err != nil {
+		return err
+	}
+	return output.Print(formatter, string(data))
 }

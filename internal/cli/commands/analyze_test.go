@@ -33,15 +33,15 @@ func Risky(userID string) {
 	})
 
 	var envelope struct {
-		Success bool   `json:"success"`
-		Result  string `json:"result"`
+		Success bool            `json:"success"`
+		Result  json.RawMessage `json:"result"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &envelope); err != nil {
 		t.Fatalf("unmarshal formatter envelope: %v\noutput=%s", err, stdout)
 	}
 
 	var result StaticAnalysisResult
-	if err := json.Unmarshal([]byte(envelope.Result), &result); err != nil {
+	if err := json.Unmarshal(envelope.Result, &result); err != nil {
 		t.Fatalf("unmarshal analysis result: %v\nresult=%s", err, envelope.Result)
 	}
 

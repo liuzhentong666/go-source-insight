@@ -1,101 +1,80 @@
 import { create } from 'zustand';
+import { CanceledError } from 'axios';
 import { authApi } from '../api/auth';
-import type { User, LoginRequest, RegisterRequest } from '../types';
+import { getApiErrorMessage } from '../api/client';
+import { getSessionGeneration, onSessionReset, readStoredToken, resetSession, setSessionToken } from '../utils/session';
+import type { User, LoginRequest, RegisterRequest, LoginResponse } from '../types';
 
 interface AuthState {
   token: string | null;
   user: User | null;
   isAuthenticated: boolean;
+  initialized: boolean;
   isLoading: boolean;
   error: string | null;
   login: (credentials: LoginRequest) => Promise<void>;
   register: (data: RegisterRequest) => Promise<void>;
   logout: () => void;
   fetchProfile: () => Promise<void>;
-  initialize: () => void;
+  initialize: () => Promise<void>;
 }
+let initialization: Promise<void> | null = null;
+let profileController: AbortController | null = null;
 
-export const useAuthStore = create<AuthState>((set, get) => ({
-  token: null,
-  user: null,
-  isAuthenticated: false,
-  isLoading: false,
-  error: null,
-
-  initialize: () => {
-    const token = localStorage.getItem('token');
-    const userStr = localStorage.getItem('user');
-    if (token && userStr) {
-      try {
-        const user = JSON.parse(userStr);
-        set({ token, user, isAuthenticated: true });
-      } catch {
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-      }
-    }
-  },
-
-  login: async (credentials) => {
+export const useAuthStore = create<AuthState>((set, get) => {
+  async function authenticate(call: () => Promise<LoginResponse>) {
+    resetSession();
+    const generation = getSessionGeneration();
     set({ isLoading: true, error: null });
     try {
-      const response = await authApi.login(credentials);
-      localStorage.setItem('token', response.token);
-      localStorage.setItem('user', JSON.stringify(response.user));
-      set({
-        token: response.token,
-        user: response.user,
-        isAuthenticated: true,
-        isLoading: false,
-      });
-    } catch (error: any) {
-      set({
-        error: error.response?.data?.error || '登录失败',
-        isLoading: false,
-      });
-      throw error;
-    }
-  },
-
-  register: async (data) => {
-    set({ isLoading: true, error: null });
-    try {
-      const response = await authApi.register(data);
-      localStorage.setItem('token', response.token);
-      localStorage.setItem('user', JSON.stringify(response.user));
-      set({
-        token: response.token,
-        user: response.user,
-        isAuthenticated: true,
-        isLoading: false,
-      });
-    } catch (error: any) {
-      set({
-        error: error.response?.data?.error || '注册失败',
-        isLoading: false,
-      });
-      throw error;
-    }
-  },
-
-  logout: () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    set({
-      token: null,
-      user: null,
-      isAuthenticated: false,
-      error: null,
-    });
-  },
-
-  fetchProfile: async () => {
-    try {
-      const user = await authApi.getProfile();
-      localStorage.setItem('user', JSON.stringify(user));
-      set({ user });
+      const response = await call();
+      if (generation !== getSessionGeneration()) throw new CanceledError('Session changed');
+      setSessionToken(response.token);
+      set({ token: response.token, user: response.user, isAuthenticated: true, initialized: true, isLoading: false });
     } catch (error) {
-      get().logout();
+      if (generation === getSessionGeneration()) set({ error: getApiErrorMessage(error, '认证失败'), isLoading: false });
+      throw error;
     }
-  },
-}));
+  }
+  async function verifyProfile() {
+    const generation = getSessionGeneration();
+    profileController?.abort();
+    const controller = new AbortController();
+    profileController = controller;
+    try {
+      const user = await authApi.getProfile(controller.signal);
+      if (generation === getSessionGeneration()) set({ user, isAuthenticated: true, error: null });
+    } catch (error) {
+      if (generation === getSessionGeneration()) {
+        resetSession();
+        set({ error: getApiErrorMessage(error, '会话验证失败，请重新登录') });
+      }
+    } finally {
+      if (profileController === controller) profileController = null;
+      if (generation === getSessionGeneration()) set({ initialized: true, isLoading: false });
+    }
+  }
+  return {
+    token: null, user: null, isAuthenticated: false, initialized: false, isLoading: false, error: null,
+    initialize: () => {
+      if (get().initialized) return Promise.resolve();
+      if (initialization) return initialization;
+      const token = readStoredToken();
+      if (!token) { set({ initialized: true }); return Promise.resolve(); }
+      setSessionToken(token);
+      set({ token, isLoading: true });
+      initialization = verifyProfile().finally(() => { initialization = null; });
+      return initialization;
+    },
+    login: credentials => authenticate(() => authApi.login(credentials)),
+    register: data => authenticate(() => authApi.register(data)),
+    logout: () => { resetSession(); },
+    fetchProfile: verifyProfile,
+  };
+});
+
+onSessionReset(() => {
+  profileController?.abort();
+  initialization = null;
+  useAuthStore.setState({ token: null, user: null, isAuthenticated: false, initialized: true, isLoading: false, error: null });
+});

@@ -1,0 +1,25 @@
+.workspace { text-align: left; max-width: 1500px; margin: 0 auto; }
+.workspace-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 22px; }
+.workspace-header h2.ant-typography { margin: 0 0 6px; }
+.workspace-eyebrow { color: #4f6ce4; font-size: 12px; font-weight: 650; letter-spacing: 1.2px; margin-bottom: 8px; }
+.workspace-grid { display: grid; grid-template-columns: 265px minmax(0, 1fr); gap: 22px; align-items: start; }
+.workspace-projects { display: flex; flex-direction: column; gap: 8px; }
+.workspace-project { display: block; border: 1px solid #e6eaf1; border-radius: 10px; padding: 13px 14px; background: white; color: #18253f; text-align: left; cursor: pointer; width: 100%; transition: border-color .15s, background .15s; }
+.workspace-project:hover { border-color: #8396ed; background: #f7f9ff; }
+.workspace-project[aria-current="page"] { background: #eef2ff; border-color: #8294e7; box-shadow: inset 3px 0 #4f6ce4; }
+.workspace-project strong { display: block; overflow-wrap: anywhere; }
+.workspace-project small { display: block; color: #738099; margin-top: 5px; }
+.workspace-stack { display: flex; flex-direction: column; gap: 18px; }
+.workspace-scope { display: flex; flex-direction: column; gap: 8px; max-width: 650px; }
+.workspace-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.workspace-metrics { display: flex; gap: 30px; flex-wrap: wrap; padding: 16px 0; }
+.workspace-metrics .ant-statistic { min-width: 96px; }
+.workspace-path { font-family: Consolas, ui-monospace, monospace; overflow-wrap: anywhere; }
+.workspace-code { background: #f4f6fa; border: 1px solid #e8ecf3; border-radius: 8px; padding: 14px; max-height: 360px; overflow: auto; white-space: pre; font: 13px/1.65 Consolas, ui-monospace, monospace; text-align: left; }
+.workspace-answer { white-space: pre-wrap; line-height: 1.85; overflow-wrap: anywhere; color: #25334c; }
+.workspace-question { white-space: pre-wrap; overflow-wrap: anywhere; font-weight: 600; margin-bottom: 12px; }
+.workspace-help { color: #778297; font-size: 13px; line-height: 1.7; }
+.workspace-welcome { padding: 42px 18px; text-align: center; }
+.workspace-task-detail { max-width: 720px; padding: 10px 0; }
+@media (max-width: 1000px) { .workspace-grid { grid-template-columns: 220px minmax(0,1fr); gap: 14px; } }
+@media (max-width: 760px) { .workspace-grid { grid-template-columns: minmax(0,1fr); } .workspace-header { flex-direction: column; } .workspace-metrics { gap: 18px; } .workspace-projects { max-height: 240px; overflow-y: auto; } .workspace-actions .ant-btn { flex: 1; } }

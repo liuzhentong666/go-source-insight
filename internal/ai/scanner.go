@@ -1,111 +1,78 @@
 package ai
 
 import (
+	"context"
 	"fmt"
+	"github.com/tmc/langchaingo/schema"
+	"go-ai-study/internal/source"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/tmc/langchaingo/schema"
 )
 
-var ignoredScanDirs = map[string]struct{}{
-	".git":         {},
-	"vendor":       {},
-	"node_modules": {},
-	"dist":         {},
-	"build":        {},
-	".idea":        {},
-	".vscode":      {},
-}
-
 func ScanCode(rootPath string) ([]schema.Document, error) {
+	return scanCode(context.Background(), rootPath)
+}
+func scanCode(ctx context.Context, rootPath string) ([]schema.Document, error) {
 	info, err := os.Stat(rootPath)
 	if err != nil {
-		return nil, fmt.Errorf("stat scan path %q: %w", rootPath, err)
+		return nil, fmt.Errorf("访问源码路径失败: %w", err)
 	}
-
-	if !info.IsDir() {
-		return scanCodeFile(rootPath, rootPath)
+	if !info.IsDir() && !source.IsGoFile(rootPath) {
+		return []schema.Document{}, nil
 	}
-
-	var docs []schema.Document
-	err = filepath.WalkDir(rootPath, func(path string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return fmt.Errorf("walk scan path %q: %w", path, walkErr)
-		}
-
-		if d.IsDir() {
-			if shouldSkipScanDir(d.Name()) && path != rootPath {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		if filepath.Ext(path) != ".go" {
-			return nil
-		}
-
-		doc, ok, err := buildCodeDocument(rootPath, path)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return nil
-		}
-
-		docs = append(docs, doc)
-		return nil
-	})
+	scan, err := source.Scan(ctx, rootPath)
 	if err != nil {
 		return nil, err
 	}
+	base := rootPath
+	if !info.IsDir() {
+		base = filepath.Dir(rootPath)
+	}
+	return documentsFromFiles(ctx, scan.Files, os.ReadFile, func(name string) (string, error) {
+		rel, err := filepath.Rel(base, name)
+		return filepath.ToSlash(rel), err
+	})
+}
 
+// FSScanner reads only through the caller's confined filesystem. Sources stay
+// relative to that filesystem's root even when a nested target is indexed.
+type FSScanner struct{ FS fs.FS }
+
+func (s *FSScanner) Scan(ctx context.Context, target string) ([]schema.Document, error) {
+	if s == nil || s.FS == nil {
+		return nil, fmt.Errorf("source filesystem is required")
+	}
+	scanned, err := source.ScanFS(ctx, s.FS, target)
+	if err != nil {
+		return nil, err
+	}
+	return documentsFromFiles(ctx, scanned.Files, func(name string) ([]byte, error) { return fs.ReadFile(s.FS, name) }, func(name string) (string, error) { return name, nil })
+}
+
+func documentsFromFiles(ctx context.Context, files []string, read func(string) ([]byte, error), relative func(string) (string, error)) ([]schema.Document, error) {
+	docs := make([]schema.Document, 0, len(files))
+	for _, path := range files {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		content, err := read(path)
+		if err != nil {
+			return nil, fmt.Errorf("读取源码失败: %w", &source.AccessError{Err: err})
+		}
+		if strings.TrimSpace(string(content)) == "" {
+			continue
+		}
+		rel, err := relative(path)
+		if err != nil {
+			return nil, fmt.Errorf("计算源码相对路径失败: %w", err)
+		}
+		rel = filepath.ToSlash(rel)
+		docs = append(docs, schema.Document{PageContent: string(content), Metadata: map[string]any{
+			"source": rel, "relative_source": rel, "file_name": filepath.Base(path),
+		}})
+	}
 	return docs, nil
 }
-
-func scanCodeFile(rootPath, path string) ([]schema.Document, error) {
-	if filepath.Ext(path) != ".go" {
-		return nil, nil
-	}
-
-	doc, ok, err := buildCodeDocument(rootPath, path)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, nil
-	}
-
-	return []schema.Document{doc}, nil
-}
-
-func buildCodeDocument(rootPath, path string) (schema.Document, bool, error) {
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return schema.Document{}, false, fmt.Errorf("read scan file %q: %w", path, err)
-	}
-
-	if strings.TrimSpace(string(content)) == "" {
-		return schema.Document{}, false, nil
-	}
-
-	relativeSource, err := filepath.Rel(rootPath, path)
-	if err != nil {
-		return schema.Document{}, false, fmt.Errorf("build relative source for %q from root %q: %w", path, rootPath, err)
-	}
-
-	return schema.Document{
-		PageContent: string(content),
-		Metadata: map[string]any{
-			"source":          filepath.ToSlash(path),
-			"relative_source": filepath.ToSlash(relativeSource),
-			"file_name":       filepath.Base(path),
-		},
-	}, true, nil
-}
-
-func shouldSkipScanDir(name string) bool {
-	_, ok := ignoredScanDirs[name]
-	return ok
-}
+func shouldSkipScanDir(name string) bool { return source.ShouldSkipDir(name) }

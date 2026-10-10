@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -29,6 +30,12 @@ func NewCodeSplitter() *CodeSplitter {
 // SplitDocuments 按 Go 函数/结构分块
 // 将输入的文档切片按照Go语言的语法结构进行智能分割
 func (cs *CodeSplitter) SplitDocuments(docs []schema.Document) ([]schema.Document, error) {
+	if cs == nil || cs.MaxLines <= 0 {
+		return nil, fmt.Errorf("split: max lines must be positive")
+	}
+	if cs.MinLines < 0 || cs.MinLines > cs.MaxLines {
+		return nil, fmt.Errorf("split: min lines must be between zero and max lines")
+	}
 	var chunks []schema.Document
 
 	for _, doc := range docs {
@@ -36,8 +43,11 @@ func (cs *CodeSplitter) SplitDocuments(docs []schema.Document) ([]schema.Documen
 		fset := token.NewFileSet()
 		node, err := parser.ParseFile(fset, "", doc.PageContent, parser.ParseComments)
 		if err != nil {
-			// 如果解析失败（比如不是Go代码），用简单的行分割
-			simpleChunks := cs.simpleSplitByLines(doc)
+			// A syntax error must not silently omit source from the index.
+			simpleChunks, splitErr := cs.splitRange(strings.Split(doc.PageContent, "\n"), 0, len(strings.Split(doc.PageContent, "\n"))-1, "text", "", doc.Metadata)
+			if splitErr != nil {
+				return nil, splitErr
+			}
 			chunks = append(chunks, simpleChunks...)
 			continue
 		}
@@ -45,133 +55,108 @@ func (cs *CodeSplitter) SplitDocuments(docs []schema.Document) ([]schema.Documen
 		// 提取代码行
 		lines := strings.Split(doc.PageContent, "\n")
 
-		// 遍历 AST，提取函数
-		ast.Inspect(node, func(n ast.Node) bool {
-			if fnDecl, ok := n.(*ast.FuncDecl); ok {
-				// 获取函数的起始和结束位置
-				start := fset.Position(fnDecl.Pos()).Line - 1
-				end := fset.Position(fnDecl.End()).Line - 1
-
-				// 边界检查
-				if start < 0 || end >= len(lines) || start > end {
-					return true
+		cursor := 0
+		for _, declaration := range node.Decls {
+			start, end := fset.PositionFor(declaration.Pos(), false).Line-1, fset.PositionFor(declaration.End(), false).Line-1
+			chunkType, symbol := "declaration", ""
+			switch decl := declaration.(type) {
+			case *ast.FuncDecl:
+				chunkType, symbol = "function", decl.Name.Name
+				if decl.Doc != nil {
+					start = fset.PositionFor(decl.Doc.Pos(), false).Line - 1
 				}
-
-				// 检查函数大小
-				if end-start+1 <= cs.MaxLines {
-					// 函数不大，直接作为一个块
-					code, contextStart, contextEnd := cs.addContext(lines, start, end)
-					chunks = append(chunks, schema.Document{
-						PageContent: code,
-						Metadata: chunkMetadata(doc.Metadata, map[string]any{
-							"chunk_type": "function",
-							"symbol":     fnDecl.Name.Name,
-							"start_line": contextStart + 1,
-							"end_line":   contextEnd + 1,
-						}),
-					})
-				} else {
-					// 函数太大，按逻辑子块分割
-					subChunks := cs.splitLargeFunction(lines, start, end, fnDecl.Name.Name, doc.Metadata)
-					chunks = append(chunks, subChunks...)
+			case *ast.GenDecl:
+				chunkType = decl.Tok.String()
+				if decl.Doc != nil {
+					start = fset.PositionFor(decl.Doc.Pos(), false).Line - 1
+				}
+				if len(decl.Specs) > 0 {
+					switch spec := decl.Specs[0].(type) {
+					case *ast.TypeSpec:
+						symbol = spec.Name.Name
+					case *ast.ValueSpec:
+						if len(spec.Names) > 0 {
+							symbol = spec.Names[0].Name
+						}
+					}
 				}
 			}
-			return true
-		})
+			// Include package, detached comments and other source between declarations.
+			if cursor < start {
+				prefix, err := cs.splitRange(lines, cursor, start-1, "file", "", doc.Metadata)
+				if err != nil {
+					return nil, err
+				}
+				chunks = append(chunks, prefix...)
+			}
+			declarationChunks, err := cs.splitRange(lines, start, end, chunkType, symbol, doc.Metadata)
+			if err != nil {
+				return nil, err
+			}
+			chunks = append(chunks, declarationChunks...)
+			cursor = end + 1
+		}
+		if cursor < len(lines) {
+			tail, err := cs.splitRange(lines, cursor, len(lines)-1, "file", "", doc.Metadata)
+			if err != nil {
+				return nil, err
+			}
+			chunks = append(chunks, tail...)
+		}
 	}
 
 	return chunks, nil
 }
 
-// addContext 添加注释上下文
-// 向前查找关联的注释，不向后吞并相邻函数，避免污染检索内容
-func (cs *CodeSplitter) addContext(lines []string, start, end int) (string, int, int) {
-	// 往前查找注释
-	contextStart := start
-	for i := start - 1; i >= 0; i-- {
-		trimmedLine := strings.TrimSpace(lines[i])
-		if trimmedLine == "" {
-			continue
-		}
-		if strings.HasPrefix(trimmedLine, "//") {
-			contextStart = i
-		} else {
-			break
-		}
-	}
-
-	contextEnd := end
-
-	// 边界保护
-	if contextStart < 0 {
-		contextStart = 0
-	}
-	if contextEnd >= len(lines) {
-		contextEnd = len(lines) - 1
-	}
-	if contextStart > contextEnd {
-		return "", contextStart, contextEnd
-	}
-
-	return strings.Join(lines[contextStart:contextEnd+1], "\n"), contextStart, contextEnd
-}
-
-// splitLargeFunction 分割大函数
-// 按照逻辑分割点将大函数拆分为多个较小的块
-func (cs *CodeSplitter) splitLargeFunction(lines []string, start, end int, symbol string, metadata map[string]any) []schema.Document {
+// splitRange preserves contiguous source and never discards a short trailing chunk.
+// Each chunk respects both the line limit and Milvus VarChar's UTF-8 byte limit.
+func (cs *CodeSplitter) splitRange(lines []string, start, end int, chunkType, symbol string, metadata map[string]any) ([]schema.Document, error) {
 	var chunks []schema.Document
-	currentStart := start
-	commentBuffer := ""
-
-	for i := start; i <= end; i++ {
-		line := strings.TrimSpace(lines[i])
-
-		// 收集注释
-		if strings.HasPrefix(line, "//") {
-			if commentBuffer == "" {
-				currentStart = i
+	if start < 0 || end >= len(lines) || start > end {
+		return nil, fmt.Errorf("split: invalid source range %d-%d", start+1, end+1)
+	}
+	for currentStart := start; currentStart <= end; {
+		limit := min(currentStart+cs.MaxLines, end+1)
+		currentEnd, byteCount := currentStart, 0
+		for currentEnd < limit {
+			lineBytes := len(lines[currentEnd])
+			if lineBytes > maxLenContent {
+				return nil, fmt.Errorf("split: source line %d exceeds %d bytes", currentEnd+1, maxLenContent)
 			}
-			commentBuffer += lines[i] + "\n"
-			continue
+			if currentEnd > currentStart {
+				lineBytes++ // newline separating adjacent source lines
+			}
+			if byteCount+lineBytes > maxLenContent {
+				break
+			}
+			byteCount += lineBytes
+			currentEnd++
 		}
-
-		// 遇到代码，检查是否应该分割
-		if line != "" {
-			// 检查是否达到最大行数或逻辑分割点
-			if i-currentStart >= cs.MaxLines || cs.isLogicalSplitPoint(line) {
-				// 创建一个块
-				code := commentBuffer + strings.Join(lines[currentStart:i+1], "\n")
-				chunks = append(chunks, schema.Document{
-					PageContent: code,
-					Metadata: chunkMetadata(metadata, map[string]any{
-						"chunk_type": "function",
-						"symbol":     symbol,
-						"start_line": currentStart + 1,
-						"end_line":   i + 1,
-					}),
-				})
-				// 重置
-				currentStart = i + 1
-				commentBuffer = ""
+		// Prefer a nearby logical boundary for long functions without losing any line.
+		if chunkType == "function" && currentEnd <= end {
+			for boundary := currentEnd - 1; boundary >= currentStart+max(1, cs.MinLines); boundary-- {
+				if cs.isLogicalSplitPoint(strings.TrimSpace(lines[boundary])) {
+					currentEnd = boundary
+					break
+				}
 			}
 		}
+		code := strings.Join(lines[currentStart:currentEnd], "\n")
+		if strings.TrimSpace(code) != "" {
+			chunks = append(chunks, schema.Document{
+				PageContent: code,
+				Metadata: chunkMetadata(metadata, map[string]any{
+					"chunk_type": chunkType,
+					"symbol":     symbol,
+					"start_line": currentStart + 1,
+					"end_line":   currentEnd,
+				}),
+			})
+		}
+		currentStart = currentEnd
 	}
 
-	// 添加最后一块
-	if currentStart <= end {
-		code := commentBuffer + strings.Join(lines[currentStart:end+1], "\n")
-		chunks = append(chunks, schema.Document{
-			PageContent: code,
-			Metadata: chunkMetadata(metadata, map[string]any{
-				"chunk_type": "function",
-				"symbol":     symbol,
-				"start_line": currentStart + 1,
-				"end_line":   end + 1,
-			}),
-		})
-	}
-
-	return chunks
+	return chunks, nil
 }
 
 // isLogicalSplitPoint 判断是否是逻辑分割点
@@ -189,30 +174,6 @@ func (cs *CodeSplitter) isLogicalSplitPoint(line string) bool {
 		}
 	}
 	return false
-}
-
-// simpleSplitByLines 简单的行分割（用于非Go代码）
-// 按照固定行数分割非Go代码或解析失败的内容
-func (cs *CodeSplitter) simpleSplitByLines(doc schema.Document) []schema.Document {
-	var chunks []schema.Document
-	lines := strings.Split(doc.PageContent, "\n")
-
-	for i := 0; i < len(lines); i += cs.MaxLines {
-		end := i + cs.MaxLines
-		if end > len(lines) {
-			end = len(lines)
-		}
-		chunks = append(chunks, schema.Document{
-			PageContent: strings.Join(lines[i:end], "\n"),
-			Metadata: chunkMetadata(doc.Metadata, map[string]any{
-				"chunk_type": "text",
-				"start_line": i + 1,
-				"end_line":   end,
-			}),
-		})
-	}
-
-	return chunks
 }
 
 func chunkMetadata(base map[string]any, fields map[string]any) map[string]any {

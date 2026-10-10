@@ -46,11 +46,23 @@ func TestNewLoggerFactory(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			logger := NewLoggerFactory(tt.config)
+			logger, err := NewLoggerFactory(tt.config)
+			if err != nil {
+				t.Fatalf("NewLoggerFactory() error = %v", err)
+			}
 			if (logger == nil) != tt.wantNil {
 				t.Errorf("NewLoggerFactory() = %v, wantNil %v", logger, tt.wantNil)
 			}
 		})
+	}
+}
+
+func TestNewLoggerFactoryPropagatesFileInitializationFailure(t *testing.T) {
+	for _, filePath := range []string{t.TempDir(), filepath.Join(t.TempDir(), "missing", "tool.log")} {
+		logger, err := NewLoggerFactory(&config.LogConfig{Level: "info", Format: "text", Output: "file", FilePath: filePath})
+		if err == nil || logger != nil {
+			t.Fatalf("file initialization failure produced logger=%v, error=%v", logger, err)
+		}
 	}
 }
 

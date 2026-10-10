@@ -42,7 +42,7 @@ export interface CreateProjectRequest {
 export interface Analysis {
   id: number;
   project_id: number;
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  status: 'pending' | JobStatus;
   result: string;
   created_at: string;
   updated_at: string;
@@ -106,6 +106,8 @@ export interface SecurityResult {
 }
 
 export interface BugIssue {
+  file?: string;
+  confidence?: string;
   id: string;
   rule_id: string;
   severity: 'High' | 'Medium' | 'Low';
@@ -140,3 +142,81 @@ export interface AnalysisResult {
   bugs: BugResult;
   analyzed_at: string;
 }
+
+export type JobStatus = 'queued' | 'running' | 'canceling' | 'canceled' | 'completed' | 'failed';
+export type JobKind = 'analyze' | 'index' | 'legacy_analyze';
+export interface JobAccepted { job_id: string; project_id: number; status: JobStatus }
+export interface LegacyJobAccepted { job_id: string; analysis_id: number; status: JobStatus }
+export interface Job extends JobAccepted {
+  recovering?: boolean;
+  scope_binding?: string;
+  kind: JobKind;
+  target: string;
+  result: StaticReport | IndexSummary | AnalysisResult | null;
+  failure_code?: string;
+  failure_reason?: string;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  analysis_id?: number;
+}
+export interface ScanResult {
+  target_path: string;
+  total_files: number;
+  production_file_count: number;
+  test_file_count: number;
+  total_lines: number;
+  skipped_dirs: string[];
+  files: string[];
+  production_files: string[];
+  test_files: string[];
+}
+export interface ProjectSourceInfo {
+  project_id: number;
+  source_mode?: 'local' | 'bound' | 'legacy';
+  binding_configured: boolean;
+  absolute_input_allowed: boolean;
+  host_root?: string;
+  binding_id: string;
+  available: boolean;
+  unavailable_code?: string;
+  excluded_paths: string[];
+}
+export interface StaticFileReport {
+  path: string;
+  functions: number;
+  complexity_issues: number;
+  security_issues: number;
+  bug_issues: number;
+  complexity: ComplexityResult | null;
+  security: SecurityResult | null;
+  bugs: BugResult | null;
+}
+export interface StaticReport {
+  target_path: string;
+  files_analyzed: number;
+  functions_analyzed: number;
+  complexity_issues: number;
+  security_issues: number;
+  bug_issues: number;
+  files: StaticFileReport[];
+}
+export interface IndexSummary {
+  target_path: string;
+  files_scanned: number;
+  chunks_created: number;
+  chunks_indexed: number;
+  collection: string;
+}
+export interface SourceCitation {
+  id: string;
+  source: string;
+  content: string;
+  score: number;
+  start_line: number;
+  end_line: number;
+  chunk_type: string;
+}
+export interface AskRequest { question: string; file?: string }
+export interface AnswerResult { question: string; answer: string; sources: SourceCitation[] }

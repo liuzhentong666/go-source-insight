@@ -55,8 +55,5 @@ func (c *ComplexityCommand) Run(ctx context.Context, args []string, formatter ou
 	}
 
 	// 输出结果
-	fmt.Println(formatter.Format(complexityResult.Result))
-
-	return nil
+	return output.Print(formatter, complexityResult.Result)
 }
-

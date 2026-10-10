@@ -1,0 +1,21 @@
+# Opt-in: merge after the base and API Compose files; CLI/API need no Web build.
+services:
+  web:
+    profiles: [web]
+    build:
+      context: ./web
+      target: web
+    image: go-source-insight-web:local
+    environment:
+      WEB_PROXY_TIMEOUT_SECONDS: ${WEB_PROXY_TIMEOUT_SECONDS:-330}
+    ports:
+      - "127.0.0.1:${WEB_PORT:-3000}:8080"
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped

@@ -63,7 +63,7 @@ func (ca *ComplexityAnalyzer) Run(ctx context.Context, input any) (string, error
 		complexity := calculateComplexity(fn)
 
 		// 计算行数
-		line := fset.Position(fn.Pos()).Line
+		line := fset.PositionFor(fn.Pos(), false).Line
 		lines := calculateLines(fset, fn)
 
 		// 生成问题列表
@@ -119,11 +119,11 @@ type ComplexityResult struct {
 
 // Statistics 统计信息
 type Statistics struct {
-	TotalFunctions        int `json:"total_functions"`        // 总函数数
-	SimpleFunctions       int `json:"simple_functions"`       // 简单函数（1-10）
-	MediumFunctions       int `json:"medium_functions"`       // 中等函数（11-20）
-	ComplexFunctions      int `json:"complex_functions"`      // 复杂函数（21-50）
-	VeryComplexFunctions  int `json:"very_complex_functions"` // 非常复杂函数（>50）
+	TotalFunctions       int `json:"total_functions"`        // 总函数数
+	SimpleFunctions      int `json:"simple_functions"`       // 简单函数（1-10）
+	MediumFunctions      int `json:"medium_functions"`       // 中等函数（11-20）
+	ComplexFunctions     int `json:"complex_functions"`      // 复杂函数（21-50）
+	VeryComplexFunctions int `json:"very_complex_functions"` // 非常复杂函数（>50）
 }
 
 // calculateComplexity 计算函数的圈复杂度
@@ -182,8 +182,8 @@ func calculateComplexity(fn *ast.FuncDecl) int {
 
 // calculateLines 计算函数的代码行数
 func calculateLines(fset *token.FileSet, fn *ast.FuncDecl) int {
-	start := fset.Position(fn.Pos()).Line
-	end := fset.Position(fn.End()).Line
+	start := fset.PositionFor(fn.Pos(), false).Line
+	end := fset.PositionFor(fn.End(), false).Line
 	return end - start + 1
 }
 

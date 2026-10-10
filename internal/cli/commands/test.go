@@ -64,7 +64,5 @@ func (c *TestCommand) Run(ctx context.Context, args []string, formatter output.F
 	}
 
 	// 输出结果
-	fmt.Println(formatter.Format(result.Result))
-
-	return nil
+	return output.Print(formatter, result.Result)
 }

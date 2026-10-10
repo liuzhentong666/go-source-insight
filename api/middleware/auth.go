@@ -5,10 +5,14 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/go-ai-study/api/utils"
+	"go-ai-study/api/utils"
 )
 
-func AuthMiddleware() gin.HandlerFunc {
+func AuthMiddleware(tokens ...*utils.Tokens) gin.HandlerFunc {
+	var signer *utils.Tokens
+	if len(tokens) > 0 {
+		signer = tokens[0]
+	}
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
@@ -25,7 +29,7 @@ func AuthMiddleware() gin.HandlerFunc {
 		}
 
 		tokenString := strings.TrimPrefix(authHeader, bearerPrefix)
-		claims, err := utils.ValidateJWT(tokenString)
+		claims, err := signer.Validate(tokenString)
 		if err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
 			c.Abort()

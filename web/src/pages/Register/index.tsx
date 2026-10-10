@@ -3,6 +3,7 @@ import { Form, Input, Button, Card, message, Typography } from 'antd';
 import { UserOutlined, LockOutlined, MailOutlined } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
+import { getApiErrorMessage, isRequestCanceled } from '../../api/client';
 
 const { Title } = Typography;
 
@@ -22,8 +23,8 @@ const Register = () => {
       await register(values);
       message.success('注册成功');
       navigate('/');
-    } catch (error: any) {
-      message.error(error.response?.data?.error || '注册失败');
+    } catch (error) {
+      if (!isRequestCanceled(error)) message.error(getApiErrorMessage(error, '注册失败'));
     }
   };
 
