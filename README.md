@@ -2,6 +2,22 @@
 
 GoSource-Insight 提供 Go 源码扫描、静态分析，以及基于 Ollama 和 Milvus 的代码问答。CLI、HTTP API 和 Web 工作台复用核心服务；扫描和静态分析可独立运行。Web 支持本机项目工作台，外部模型供应商 API 仍暂缓。
 
+## 写给学习者与 Go 开发者
+
+这个项目是一半 vibe coding，对于非计算机专业的学生也可以学习；对于计算机专业的学生，这个项目包含了向量检索、数据库、Go 语言 Web 开发、Ollama 本地部署、RAG 检索增强，如果你有兴趣，还可以自行扩展，接入使用 API key 的外部模型服务，是一个学习 AI 应用的好项目。
+
+对于 Go 语言开发者，我们完全尊重你的知识和你的技术，所以我们没有内置外部模型 API。你的代码应该属于你，无论你手敲还是 vibe coding，都是你宝贵的知识成果，希望这个项目可以帮到你。
+
+最后，如果喜欢我们的项目，可以点一颗 star，我们会持续更新。
+
+### For learners and Go developers
+
+About half of this project was developed through vibe coding, and students from non-computer-science backgrounds can learn from it too. For computer science students, it brings together vector search, databases, web development in Go, local Ollama deployment, and retrieval-augmented generation (RAG). If you are interested, you can extend it yourself to connect to external model providers using an API key. It is a good project for learning how to build AI applications.
+
+For Go developers, we fully respect your knowledge and technical skills. That is why we have kept the model integration local and have not built in external model APIs. Your code should belong to you: whether you write it by hand or through vibe coding, it is valuable intellectual work. We hope this project can help you.
+
+Finally, if you like the project, please give it a star. We will keep updating it.
+
 ## 核心命令
 
 | 命令 | 职责 | 依赖 |
