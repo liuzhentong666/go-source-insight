@@ -12,6 +12,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$sourceAccessMode = $env:SOURCE_ACCESS_MODE
+if (-not $sourceAccessMode) { $sourceAccessMode = 'host' }
+if ($sourceAccessMode -notin @('host','mapped')) { throw 'SOURCE_ACCESS_MODE must be host or mapped.' }
 if ($Mode -eq 'cli' -and $SourceBindingsComposeFile) { throw 'Source bindings are only valid with Mode api or web.' }
 if ($Mode -eq 'cli' -and $SourceDirectory) { throw 'SourceDirectory requires Mode api or web.' }
 if ($SourceDirectory -and $SourceBindingsComposeFile) { throw 'Use SourceDirectory by itself; it preserves the existing API source configuration automatically.' }
@@ -63,6 +66,7 @@ function Prepare-ApiCredentials {
     if (-not $jwtSecret -or $jwtSecret.Length -lt 32 -or $jwtSecret -match '(?i)secret|change.?me|password|example|placeholder|your-|replace' -or (($jwtSecret.ToCharArray() | Select-Object -Unique).Count -lt 12)) { throw 'API_JWT_SECRET is missing or weak. Existing credentials were not modified.' }
 }
 $projectDirectory = Split-Path -Parent $PSScriptRoot
+if (-not (Get-Command Initialize-SourceReader -ErrorAction SilentlyContinue)) { . "$PSScriptRoot/source-reader.ps1" }
 Push-Location -LiteralPath $projectDirectory
 try {
     if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
@@ -84,7 +88,36 @@ try {
             $buildServices += 'web'
         }
         if (Test-Path -LiteralPath $ApiEnvFile) { $composeOptions += @('--env-file', $ApiEnvFile) }
-        $existingAPI = ''
+        $existingAPI = ((docker compose @composeOptions ps -a -q api) -join "`n").Trim()
+        if ($LASTEXITCODE -ne 0) { throw 'Could not identify the existing API.' }
+        if ($existingAPI -and -not $env:API_PORT) {
+            $activePort = ((docker inspect --format '{{range index .NetworkSettings.Ports "8080/tcp"}}{{.HostPort}}{{end}}' $existingAPI) -join '').Trim()
+            if ($LASTEXITCODE -ne 0) { throw 'Could not preserve the current API port.' }
+            if ($activePort) {
+                if ($activePort -notmatch '^\d{1,5}$') { throw 'Ambiguous current API port; set API_PORT explicitly.' }
+                $env:API_PORT = $activePort
+            }
+        }
+        if ($Mode -eq 'web' -and -not $env:WEB_PORT) {
+            $existingWeb = ((docker compose @composeOptions ps -a -q web) -join '').Trim()
+            if ($existingWeb) {
+                $activeWebPort = ((docker inspect --format '{{range index .NetworkSettings.Ports "8080/tcp"}}{{.HostPort}}{{end}}' $existingWeb) -join '').Trim()
+                if ($LASTEXITCODE -ne 0) { throw 'Could not preserve the current Web port.' }
+                if ($activeWebPort) {
+                    if ($activeWebPort -notmatch '^\d{1,5}$') { throw 'Ambiguous current Web port; set WEB_PORT explicitly.' }
+                    $env:WEB_PORT = $activeWebPort
+                }
+            }
+        }
+        if ($existingAPI -and -not $SourceDirectory -and -not $SourceBindingsComposeFile) {
+            $oldFiles = ((docker inspect --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' $existingAPI) -join '').Split(',')
+            foreach ($oldFile in $oldFiles) {
+                if ([IO.Path]::GetFileName($oldFile) -eq 'source-bindings.compose.json') {
+                    if (-not (Test-Path -LiteralPath $oldFile)) { throw 'Active source binding override is missing; refusing to discard it.' }
+                    $composeOptions += @('-f', $oldFile)
+                }
+            }
+        }
         if ($SourceDirectory) {
             if (-not (Get-Command go -ErrorAction SilentlyContinue)) { throw 'A compatible Go toolchain is required to prepare the local source directory.' }
             $existingAPI = ((docker compose @composeOptions ps -a -q api) -join "`n").Trim()
@@ -99,6 +132,7 @@ try {
             if (-not (Test-Path -LiteralPath $SourceBindingsComposeFile -PathType Leaf)) { throw 'The source-binding Compose override does not exist.' }
             $composeOptions += @('-f', (Resolve-Path -LiteralPath $SourceBindingsComposeFile).Path)
         }
+        if ($sourceAccessMode -eq 'host') { $composeOptions += @('-f', (Initialize-SourceReader)) }
         if (-not $env:API_SOURCE_DIR) { New-Item -ItemType Directory -Force -Path 'sources' | Out-Null }
         Write-Host 'Validating API deployment configuration...'
         docker compose @composeOptions config --quiet
@@ -108,7 +142,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Deployment image build failed.' }
         Write-Host 'Starting services; waiting for Web/core readiness (AI readiness is separate)...'
         $updateOptions = @()
-        if ($SourceDirectory -and $existingAPI) {
+        if ($existingAPI) {
             $services = @('api')
             if ($Mode -eq 'web') { $services += 'web' }
             $updateOptions += '--no-deps'
@@ -124,9 +158,9 @@ try {
             if ($LASTEXITCODE -ne 0) { throw 'Cached AI services/models failed verification. No model download was attempted.' }
         }
         if ($Mode -eq 'web') {
-            Write-Host 'Web and API core are ready. Open the loopback Web address shown by Compose (default http://127.0.0.1:3000). See web/README.md for source preparation.'
+            Write-Host 'Web and API core are ready. Open http://127.0.0.1:3000 (or your configured Web port) and enter a local Go file or directory path.'
         } else {
-            Write-Host 'API core is ready. Use the loopback API address shown by Compose (default http://127.0.0.1:8087). See api/README.md for registration and source binding.'
+            Write-Host 'API core is ready. Use http://127.0.0.1:8087 (or your configured API port); local Go file and directory paths are available.'
         }
         return
     }
@@ -147,7 +181,7 @@ try {
     Write-Host 'Verifying model dimensions and vector service connectivity...'
     docker compose run --rm -T insight -f json doctor
     if ($LASTEXITCODE -ne 0) { throw 'Service verification failed. Check models, vector dimensions and Milvus connectivity.' }
-    Write-Host 'Deployment is ready. Run: docker compose run --rm insight scan /workspace'
+    Write-Host 'Deployment is ready. Run: ./scripts/insight.ps1 scan "C:\code\project"'
     Write-Host 'Then index the source directory and ask a question using the same collection.'
 } finally {
     Pop-Location

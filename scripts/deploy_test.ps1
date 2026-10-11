@@ -6,16 +6,27 @@ $scriptDirectory = $PSScriptRoot
 $testRoot = Join-Path (Split-Path -Parent $scriptDirectory) ('bin/deploy-tests/' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
 $savedVariables = @{}
-foreach ($name in @('API_DB_PASSWORD','API_JWT_SECRET','API_SOURCE_DIR')) { $savedVariables[$name] = [Environment]::GetEnvironmentVariable($name,'Process'); [Environment]::SetEnvironmentVariable($name,$null,'Process') }
+foreach ($name in @('API_DB_PASSWORD','API_JWT_SECRET','API_SOURCE_DIR','SOURCE_ACCESS_MODE','API_PORT','WEB_PORT')) { $savedVariables[$name] = [Environment]::GetEnvironmentVariable($name,'Process'); [Environment]::SetEnvironmentVariable($name,$null,'Process') }
 $env:API_SOURCE_DIR = $testRoot
 $global:deploymentCalls = New-Object System.Collections.Generic.List[string]
 $global:deploymentFailure = ''
 $global:deploymentAPI = ''
+$global:deploymentPreviousCompose = ''
+function Initialize-SourceReader { return (Join-Path $testRoot 'reader.compose.json') }
+Set-Content -LiteralPath (Join-Path $testRoot 'reader.compose.json') -Value '{"services":{"api":{"environment":{"SOURCE_ACCESS_MODE":"host"}}}}'
 function docker {
     $global:deploymentCalls.Add(($args -join ' '))
     $global:LASTEXITCODE = 0
     if ($global:deploymentFailure -and ($args -contains $global:deploymentFailure)) { $global:LASTEXITCODE = 17 }
-    if ($args -contains 'ps' -and $global:deploymentAPI) { Write-Output $global:deploymentAPI }
+    if ($args -contains 'ps' -and $global:deploymentAPI) {
+        if ($args[-1] -eq 'web') { Write-Output 'webfixture' } else { Write-Output $global:deploymentAPI }
+    }
+    if ($args -contains 'inspect' -and $global:deploymentPreviousCompose) {
+        if (($args -join ' ') -match 'project.config_files') { Write-Output $global:deploymentPreviousCompose }
+        elseif (($args -join ' ') -match '8080/tcp') {
+            if ($args[-1] -eq 'webfixture') { Write-Output '13000' } else { Write-Output '18087' }
+        }
+    }
 }
 try {
     $parseErrors = $null
@@ -24,6 +35,12 @@ try {
     $envFile = Join-Path $testRoot 'credentials/api.env'
     & (Join-Path $scriptDirectory 'deploy.ps1') -Mode api -ApiEnvFile $envFile | Out-Null
     $initialHash = (Get-FileHash -LiteralPath $envFile).Hash
+    if (-not (($global:deploymentCalls -join "`n").Contains('reader.compose.json'))) { throw 'Host reader override was not applied.' }
+    $global:deploymentCalls.Clear()
+    $env:SOURCE_ACCESS_MODE = 'mapped'
+    & (Join-Path $scriptDirectory 'deploy.ps1') -Mode api -ApiEnvFile $envFile | Out-Null
+    if (($global:deploymentCalls -join "`n").Contains('reader.compose.json')) { throw 'Mapped deployment started the host reader.' }
+    $env:SOURCE_ACCESS_MODE = 'host'
     & (Join-Path $scriptDirectory 'deploy.ps1') -Mode api -ApiEnvFile $envFile | Out-Null
     if ((Get-FileHash -LiteralPath $envFile).Hash -ne $initialHash) { throw 'Repeated deployment changed credentials.' }
     if (($global:deploymentCalls -join "`n") -match 'pull|run --rm models') { throw 'API mode attempted a model download.' }
@@ -71,6 +88,15 @@ try {
     try { & (Join-Path $scriptDirectory 'deploy.ps1') -Mode web -ApiEnvFile $envFile -SourceDirectory $localSource | Out-Null } finally { Remove-Item Function:\go; $global:deploymentAPI = '' }
     $existingCalls = $global:deploymentCalls -join "`n"
     if ($existingCalls -notmatch 'up -d --no-deps --wait --wait-timeout 300 api web' -or $existingCalls -match 'up .*postgres') { throw 'Directory update did not preserve existing dependency services.' }
+    $global:deploymentAPI = 'abcdef123456'
+    $global:deploymentPreviousCompose = $localEntry
+    $global:deploymentCalls.Clear()
+    try { & (Join-Path $scriptDirectory 'deploy.ps1') -Mode web -ApiEnvFile $envFile | Out-Null } finally { $global:deploymentAPI = ''; $global:deploymentPreviousCompose = '' }
+    $existingCalls = $global:deploymentCalls -join "`n"
+    if (-not $existingCalls.Contains($localEntry)) { throw 'Host upgrade discarded active source binding override.' }
+    if ($existingCalls -notmatch 'up -d --no-deps --wait') { throw 'Host upgrade did not preserve dependency services.' }
+    if ($env:API_PORT -ne '18087') { throw 'Host upgrade did not preserve the API port.' }
+    if ($env:WEB_PORT -ne '13000') { throw 'Host upgrade did not preserve the Web port.' }
     $failed = $false
     try { & (Join-Path $scriptDirectory 'deploy.ps1') -Mode cli -SourceBindingsComposeFile $bindingFile | Out-Null } catch { $failed = $true }
     if (-not $failed) { throw 'CLI accepted API source bindings.' }

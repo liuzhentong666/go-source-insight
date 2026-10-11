@@ -80,7 +80,7 @@ func run(ctx context.Context) error {
 	repo = storage.NewPostgresWithInstance(db, instance)
 	serviceCtx, stopService := context.WithCancel(context.Background())
 	defer stopService()
-	svc, err := service.NewSource(serviceCtx, repo, cfg.SourceRoot, cfg.JobWorkers, cfg.JobQueueSize, service.RAGSettings{JobTimeout: cfg.JobTimeout, SourceBindings: cfg.SourceBindings, LocalRoot: cfg.LocalRoot})
+	svc, err := service.NewSource(serviceCtx, repo, cfg.SourceRoot, cfg.JobWorkers, cfg.JobQueueSize, service.RAGSettings{JobTimeout: cfg.JobTimeout, SourceBindings: cfg.SourceBindings, LocalRoot: cfg.LocalRoot, SourceAccessMode: cfg.SourceAccessMode, SourceReader: cfg.SourceReader})
 	if err != nil {
 		return errors.New("source service initialization failed")
 	}

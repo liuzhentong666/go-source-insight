@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"go-ai-study/internal/localfiles"
 	"go-ai-study/internal/source"
 	"os"
 	"path"
@@ -38,12 +39,22 @@ func (c *IndexCommand) Run(ctx context.Context, args []string, formatter output.
 	if len(opts.operands) != 1 {
 		return fmt.Errorf("使用: index [--collection NAME] PATH")
 	}
-	info, err := os.Stat(opts.operands[0])
+	provider, err := localfiles.FromEnvironment()
 	if err != nil {
-		return fmt.Errorf("访问索引路径失败: %w", err)
+		return err
 	}
-	if !info.IsDir() && !source.IsGoFile(opts.operands[0]) {
-		return fmt.Errorf("index 只接受目录或 Go 源文件")
+	if provider.URL != "" && localfiles.IsAbsolute(opts.operands[0]) {
+		if _, err := provider.Resolve(ctx, opts.operands[0]); err != nil {
+			return err
+		}
+	} else {
+		info, err := os.Stat(opts.operands[0])
+		if err != nil {
+			return fmt.Errorf("访问索引路径失败: %w", err)
+		}
+		if !info.IsDir() && !source.IsGoFile(opts.operands[0]) {
+			return fmt.Errorf("index 只接受目录或 Go 源文件")
+		}
 	}
 	svc, err := c.factory(ctx, opts.collection)
 	if err != nil {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go-ai-study/api/sourcefiles"
 	"go-ai-study/api/utils"
+	"go-ai-study/internal/localfiles"
 	"log"
 	"net/url"
 	"os"
@@ -15,17 +16,19 @@ import (
 )
 
 type Config struct {
-	Port            string
-	Database        DatabaseConfig
-	JWT             JWTConfig
-	SourceRoot      string
-	SourceBindings  []sourcefiles.Binding
-	LocalRoot       *sourcefiles.LocalRoot
-	JobWorkers      int
-	JobQueueSize    int
-	JobTimeout      time.Duration
-	ShutdownTimeout time.Duration
-	CORSOrigins     []string
+	SourceAccessMode string
+	SourceReader     localfiles.Provider
+	Port             string
+	Database         DatabaseConfig
+	JWT              JWTConfig
+	SourceRoot       string
+	SourceBindings   []sourcefiles.Binding
+	LocalRoot        *sourcefiles.LocalRoot
+	JobWorkers       int
+	JobQueueSize     int
+	JobTimeout       time.Duration
+	ShutdownTimeout  time.Duration
+	CORSOrigins      []string
 }
 
 type DatabaseConfig struct {
@@ -56,6 +59,17 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	root := os.Getenv("SOURCE_ROOT")
+	mode := os.Getenv("SOURCE_ACCESS_MODE")
+	if mode == "" {
+		mode = "host"
+	}
+	if mode != "host" && mode != "mapped" {
+		return nil, fmt.Errorf("SOURCE_ACCESS_MODE must be host or mapped")
+	}
+	reader, err := localfiles.FromEnvironment()
+	if err != nil {
+		return nil, err
+	}
 	if root == "" {
 		root = "sources"
 	}
@@ -78,6 +92,7 @@ func Load() (*Config, error) {
 		}
 	}
 	return &Config{
+		SourceAccessMode: mode, SourceReader: reader,
 		JobTimeout: time.Duration(timeout) * time.Second, ShutdownTimeout: time.Duration(shutdown) * time.Second, CORSOrigins: origins,
 		SourceRoot: root, JobWorkers: workers, JobQueueSize: queueSize,
 		SourceBindings: sources.Bindings, LocalRoot: sources.LocalRoot,

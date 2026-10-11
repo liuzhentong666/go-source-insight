@@ -33,6 +33,7 @@ services:
       DB_PASSWORD: ${API_DB_PASSWORD:?Set API_DB_PASSWORD or use the API deployment script}
       JWT_SECRET: ${API_JWT_SECRET:?Set API_JWT_SECRET or use the API deployment script}
       SOURCE_ROOT: /sources
+      SOURCE_ACCESS_MODE: ${SOURCE_ACCESS_MODE:-mapped}
       JOB_WORKERS: ${JOB_WORKERS:-2}
       JOB_QUEUE_SIZE: ${JOB_QUEUE_SIZE:-16}
       JOB_TIMEOUT_SECONDS: ${JOB_TIMEOUT_SECONDS:-900}

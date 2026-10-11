@@ -7,17 +7,17 @@ API 使用根 Go 模块中的扫描、静态分析和 Ollama RAG 服务。Web �
 需要 Docker Compose V2 和 Linux 容器。在仓库根目录运行：
 
 ```powershell
-./scripts/deploy.ps1 -Mode api -SourceDirectory 'C:\code\project'
+./scripts/deploy.ps1 -Mode api
 # 已有模型缓存时，另外启动/检查 AI 服务；不会下载模型：
 ./scripts/deploy.ps1 -Mode api -WithAI
 ```
 
 ```bash
-bash scripts/deploy.sh --mode api --source-directory '/workspace/project'
+bash scripts/deploy.sh --mode api
 bash scripts/deploy.sh --mode api --with-ai
 ```
 
-本项目是私人本机工具。目录参数校验并只读挂载源码，新建/选择项目后可直接提交该根内完整路径；无需管理员或手填所有者/项目 ID。已有同项目 API 时，目录入口只更新 API 并保留数据库/模型服务。未传目录参数时，默认仅启动 PostgreSQL 和 API；API 就绪不依赖 Ollama/Milvus。`WithAI` / `--with-ai` 复用基础 Compose 的 AI 服务及命名卷，等待健康并通过现有 `doctor` 验证缓存模型、向量维度和 Milvus。缓存缺失时明确失败，不自动下载；需要首次准备模型时先使用原 CLI 部署入口。聊天模型预检仍暂缓。
+本项目是私人本机工具。默认 host 模式需要宿主 Go 工具链（Bash 还需 `curl`、`openssl` 及常见系统工具 `ps`、`find`、`cksum`），部署自动准备宿主源码读取服务；新建/选择项目后直接提交任意本机可读目录/Go 文件完整路径，不需要固定根或身份 ID。已有同项目 API 时更新 API 并保留数据库/模型服务。显式 `SOURCE_ACCESS_MODE=mapped` 保留 `-SourceDirectory` / `--source-directory` 挂载入口。API 核心就绪不代表 AI 在线；`WithAI` / `--with-ai` 检查已有缓存模型，不下载缺失模型。
 
 首次运行生成随机数据库密码和 JWT 密钥到已忽略的 `.runtime/api.env`，重复运行复用文件，不重置凭据。Unix 文件权限为 600；PowerShell 尽量将凭据目录 ACL 限制为当前身份，失败时给出警告。缺失/弱的既有凭据文件会导致失败，不自动修复。也可在调用环境中同时提供 `API_DB_PASSWORD` 和 `API_JWT_SECRET`，此时不生成文件；不要将值放入命令历史、仓库或日志。环境变量优先于文件，必须与已有 PostgreSQL 卷中的凭据匹配。
 
@@ -120,13 +120,13 @@ wait_job "$index_id" && api --data '{"question":"What does Hello return?","file"
 api --data '{}' "$base/api/v1/jobs/$index_id/cancel"
 ```
 
-源码 `target` 默认为相对 `.`，相对 API 调用继续使用旧项目映射或 `<SOURCE_ROOT>/<owner-id>/<project-id>`。本地目录入口启用后，各项目可提交该根内完整目录或 `.go` 文件路径，后端转换为相对范围并受控读取；本地根失效或输入越界明确失败，不回退旧根。Linux 实际源码根和祖先需允许 UID 10001 读取/遍历。问答来源和文件过滤保持相对路径；源目录移走仍可查询已发布索引。
+源码 `target` 默认为相对 `.`，相对 API 调用继续使用旧项目映射或 `<SOURCE_ROOT>/<owner-id>/<project-id>`。host 模式绝对目录以该目录为结果根、任务目标为 `.`；单 Go 文件仅读取该文件、任务目标为文件名。mapped 模式仍限制在配置根内且根失效/越界不回退。问答来源和 `ask.file` 保持相对路径，已发布索引查询不依赖原目录仍存在。
 
 ### 使用既有本地目录
 
-常用入口为 `./scripts/deploy.ps1 -Mode api -SourceDirectory 'C:\code\project'` 或 `bash scripts/deploy.sh --mode api --source-directory '/workspace/project'`，不需要独立绑定或身份 ID。脚本自动复用活动配置目录和旧项目映射，保留凭据与旧索引；相同待应用配置可直接重试，不同待应用配置拒绝覆盖。完整保存、权限与重试规则见 [本地源码目录](../docs/SOURCE_BINDINGS.md)。
+常用入口为 `./scripts/deploy.ps1 -Mode api` 或 `bash scripts/deploy.sh --mode api`，自动准备宿主读取服务；服务端 `SOURCE_READER_URL` / `SOURCE_READER_TOKEN` 不由浏览器提交。mapped 目录保存与重试规则见 [本地源码读取](../docs/SOURCE_BINDINGS.md)。
 
-`GET /api/v1/projects/:id/source` 返回 `source_mode`（`local`、`bound`、`legacy`）、有效显示根、可用性、排除项和 opaque `binding_id`，不返回内部容器根。未配置完整路径或越界返回 `invalid_target`；不可用时查询为 `available=false`，操作为 `source_unavailable`。链接/reparse point 为 `unsafe_path`，排除为 `excluded_target`。运行产物按实际根位置排除，不全局禁业务同名目录。配置变化不自动更新索引，需用户明确确认建立新索引。
+`GET /api/v1/projects/:id/source` 返回 `source_mode`（`host`、`local`、`bound`、`legacy`）、可用性、排除项和 opaque `binding_id`。host 可无 `host_root`，`available` 表示读取服务可用；网页按身份和完整输入隔离扫描/分析关联。mapped 返回有效显示根且不暴露容器根。格式错误为 `invalid_target`，读取不可用为 `source_unavailable`，链接/reparse point 为 `unsafe_path`，排除为 `excluded_target`。配置和输入变化不自动更新索引。
 
 ## 运行语义和配置
 

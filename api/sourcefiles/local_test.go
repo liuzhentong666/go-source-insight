@@ -6,11 +6,66 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"go-ai-study/api/fault"
+	"go-ai-study/internal/localfiles"
 )
+
+func TestHostScopesOutsideConfiguredRootRemainIndependent(t *testing.T) {
+	legacy, local, external := t.TempDir(), t.TempDir(), t.TempDir()
+	for _, root := range []string{local, external, filepath.Join(legacy, "7", "1")} {
+		if err := os.MkdirAll(root, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package sample\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	os.MkdirAll(filepath.Join(local, "private"), 0700)
+	os.WriteFile(filepath.Join(local, "private", "hidden.go"), []byte("package sample"), 0600)
+	w, err := NewWithConfig(legacy, nil, &LocalRoot{HostRoot: local, ContainerRoot: local, ExcludePaths: []string{"private"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.EnableHostAccess(localfiles.Provider{})
+	var scopes []Scope
+	for _, target := range []string{local, filepath.Join(external, "main.go"), "."} {
+		scope, err := w.ResolveContext(context.Background(), 7, 1, target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scopes = append(scopes, scope)
+	}
+	for _, scope := range scopes {
+		result, err := scope.Scan(context.Background())
+		if err != nil || len(result.Files) != 1 || result.Files[0] != "main.go" {
+			t.Fatalf("scope=%+v scan=%+v err=%v", scope, result, err)
+		}
+	}
+	if runtime.GOOS != "windows" {
+		os.MkdirAll(filepath.Join(local, "Private"), 0700)
+		os.WriteFile(filepath.Join(local, "Private", "business.go"), []byte("package business"), 0600)
+		result, err := scopes[0].Scan(context.Background())
+		if err != nil || len(result.Files) != 2 {
+			t.Fatalf("POSIX case-distinct business directory excluded: %+v %v", result, err)
+		}
+	}
+	if _, err := w.Resolve(7, 1, filepath.Join(local, "private")); !errors.Is(err, fault.ErrExcludedTarget) {
+		t.Fatalf("lost exclusion: %v", err)
+	}
+	info := w.Info(7, 1)
+	if info.SourceMode != "host" || !info.Available || !info.AbsoluteInputAllowed || info.HostRoot != "" {
+		t.Fatalf("host info: %+v", info)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := w.ResolveContext(ctx, 7, 1, external); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled resolve: %v", err)
+	}
+}
 
 func TestLocalScopePreservesRelativeBindingAndLegacyRoots(t *testing.T) {
 	legacy, bound, local := t.TempDir(), t.TempDir(), t.TempDir()

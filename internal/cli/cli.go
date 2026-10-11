@@ -12,7 +12,9 @@ import (
 	"go-ai-study/internal/cli/commands"
 	"go-ai-study/internal/cli/output"
 	"go-ai-study/internal/config"
+	"go-ai-study/internal/localfiles"
 	"go-ai-study/internal/tools"
+	"io/fs"
 )
 
 type CLI struct {
@@ -101,12 +103,38 @@ func (c *CLI) newRAG(ctx context.Context, collection string) (commands.RAGClient
 		return nil, fmt.Errorf("AI 配置无效: %w", err)
 	}
 	r := cfg.RAGConfig
-	return ai.NewOllamaRAGService(ctx, ai.FactoryOptions{
+	service, err := ai.NewOllamaRAGService(ctx, ai.FactoryOptions{
 		OllamaEndpoint: cfg.OllamaEndpoint, MilvusEndpoint: cfg.MilvusEndpoint,
 		Timeout: time.Duration(cfg.RequestTimeoutSeconds) * time.Second,
 		RAG: ai.RAGOptions{Collection: r.Collection, EmbeddingModel: r.EmbeddingModel, ChatModel: r.ChatModel,
 			VectorDim: r.VectorDim, TopK: r.TopK, ChunkMaxLines: r.ChunkMaxLines, ChunkMinLines: r.ChunkMinLines},
 	})
+	if err != nil {
+		return nil, err
+	}
+	return &hostRAG{RAGService: service}, nil
+}
+
+type hostRAG struct{ *ai.RAGService }
+
+func (s *hostRAG) Index(ctx context.Context, target string) (*ai.IndexSummary, error) {
+	provider, err := localfiles.FromEnvironment()
+	if err != nil {
+		return nil, err
+	}
+	if provider.URL == "" || !localfiles.IsAbsolute(target) {
+		return s.RAGService.Index(ctx, target)
+	}
+	var result *ai.IndexSummary
+	err = provider.WithFS(ctx, target, func(files fs.FS, relative string) error {
+		previous := s.Scanner
+		s.Scanner = &ai.FSScanner{FS: files}
+		defer func() { s.Scanner = previous }()
+		var err error
+		result, err = s.RAGService.Index(ctx, relative)
+		return err
+	})
+	return result, err
 }
 
 func registerTools(tm *tools.ToolManager) {
@@ -183,4 +211,5 @@ const helpText = `go-ai-insight - Go 源码扫描、静态分析与 Ollama 问�
   go-ai-insight index --collection sample_code ./project
   go-ai-insight ask --collection sample_code "项目的入口在哪里？"
 
-外部模型 API、Web 平台：TODO。`
+Web 工作台已支持扫描、静态分析、索引和问答；外部模型 API 尚未支持。
+配置宿主源码读取器时，CLI 的完整路径指向宿主机；未配置时直接读取本进程可见路径。`

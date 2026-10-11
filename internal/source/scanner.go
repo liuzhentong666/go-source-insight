@@ -60,13 +60,20 @@ func ScanFS(ctx context.Context, filesystem fs.FS, target string) (ScanResult, e
 	if !fs.ValidPath(target) {
 		return ScanResult{}, fmt.Errorf("invalid relative source target")
 	}
-	return scan(ctx, target,
+	skipDir := ShouldSkipDir
+	if policy, ok := filesystem.(interface{ ShouldSkipSourceDir(string) bool }); ok {
+		skipDir = policy.ShouldSkipSourceDir
+	}
+	return scanWithPolicy(ctx, target,
 		func(name string) (fs.FileInfo, error) { return fs.Stat(filesystem, name) },
 		func(name string) ([]byte, error) { return fs.ReadFile(filesystem, name) },
-		func(name string, fn fs.WalkDirFunc) error { return fs.WalkDir(filesystem, name, fn) })
+		func(name string, fn fs.WalkDirFunc) error { return fs.WalkDir(filesystem, name, fn) }, skipDir)
 }
 
 func scan(ctx context.Context, target string, stat func(string) (fs.FileInfo, error), read func(string) ([]byte, error), walk func(string, fs.WalkDirFunc) error) (ScanResult, error) {
+	return scanWithPolicy(ctx, target, stat, read, walk, ShouldSkipDir)
+}
+func scanWithPolicy(ctx context.Context, target string, stat func(string) (fs.FileInfo, error), read func(string) ([]byte, error), walk func(string, fs.WalkDirFunc) error, skipDir func(string) bool) (ScanResult, error) {
 	result := ScanResult{TargetPath: target, Files: []string{}, ProductionFiles: []string{}, TestFiles: []string{}, SkippedDirs: []string{}}
 	if err := ctx.Err(); err != nil {
 		return result, err
@@ -83,7 +90,7 @@ func scan(ctx context.Context, target string, stat func(string) (fs.FileInfo, er
 		components = components[:len(components)-1]
 	}
 	for _, component := range components {
-		if ShouldSkipDir(component) {
+		if skipDir(component) {
 			return result, fmt.Errorf("source target is inside an excluded directory: %w", &AccessError{Err: fs.ErrPermission})
 		}
 	}
@@ -126,7 +133,7 @@ func scan(ctx context.Context, target string, stat func(string) (fs.FileInfo, er
 				return nil
 			}
 			if d.IsDir() {
-				if path != target && ShouldSkipDir(d.Name()) {
+				if path != target && skipDir(d.Name()) {
 					result.SkippedDirs = append(result.SkippedDirs, path)
 					return filepath.SkipDir
 				}

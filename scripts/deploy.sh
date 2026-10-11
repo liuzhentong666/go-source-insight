@@ -3,8 +3,11 @@ set -euo pipefail
 
 project_directory="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd -- "$project_directory"
+declare -F initialize_source_reader >/dev/null || source scripts/source-reader.sh
 wait_timeout="${WAIT_TIMEOUT_SECONDS:-300}"
 mode=cli
+source_access_mode="${SOURCE_ACCESS_MODE:-host}"
+[[ "$source_access_mode" == host || "$source_access_mode" == mapped ]] || { printf '%s\n' 'SOURCE_ACCESS_MODE must be host or mapped.' >&2; exit 2; }
 with_ai=false
 api_env_file=.runtime/api.env
 bindings_file=''
@@ -88,7 +91,34 @@ if [[ "$mode" == api || "$mode" == web ]]; then
     build_services+=(web)
   fi
   [[ ! -e "$api_env_file" ]] || compose_options+=(--env-file "$api_env_file")
-  existing_api=''
+  existing_api="$(docker compose "${compose_options[@]}" ps -a -q api)"
+  if [[ -n "$existing_api" && -z "${API_PORT:-}" ]]; then
+    active_port="$(docker inspect --format '{{range index .NetworkSettings.Ports "8080/tcp"}}{{.HostPort}}{{end}}' "$existing_api")"
+    if [[ -n "$active_port" ]]; then
+      [[ "$active_port" =~ ^[0-9]{1,5}$ ]] || { printf '%s\n' 'Ambiguous current API port; set API_PORT explicitly.' >&2; exit 1; }
+      export API_PORT="$active_port"
+    fi
+  fi
+  if [[ "$mode" == web && -z "${WEB_PORT:-}" ]]; then
+    existing_web="$(docker compose "${compose_options[@]}" ps -a -q web)"
+    if [[ -n "$existing_web" ]]; then
+      active_web_port="$(docker inspect --format '{{range index .NetworkSettings.Ports "8080/tcp"}}{{.HostPort}}{{end}}' "$existing_web")"
+      if [[ -n "$active_web_port" ]]; then
+        [[ "$active_web_port" =~ ^[0-9]{1,5}$ ]] || { printf '%s\n' 'Ambiguous current Web port; set WEB_PORT explicitly.' >&2; exit 1; }
+        export WEB_PORT="$active_web_port"
+      fi
+    fi
+  fi
+  if [[ -n "$existing_api" && -z "$source_directory" && -z "$bindings_file" ]]; then
+    old_files="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' "$existing_api")"
+    IFS=',' read -r -a previous_files <<< "$old_files"
+    for previous_file in "${previous_files[@]}"; do
+      if [[ "${previous_file##*/}" == source-bindings.compose.json ]]; then
+        [[ -f "$previous_file" ]] || { printf '%s\n' 'Active source binding override is missing; refusing to discard it.' >&2; exit 1; }
+        compose_options+=(-f "$previous_file")
+      fi
+    done
+  fi
   if [[ -n "$source_directory" ]]; then
     command -v go >/dev/null || { printf '%s\n' 'A compatible Go toolchain is required to prepare the local source directory.' >&2; exit 1; }
     existing_api="$(docker compose "${compose_options[@]}" ps -a -q api)"
@@ -99,6 +129,10 @@ if [[ "$mode" == api || "$mode" == web ]]; then
     printf '%s\n' 'Prepared the local source directory. Source changes never rebuild an existing index automatically.'
   fi
   [[ -z "$bindings_file" ]] || compose_options+=(-f "$bindings_file")
+  if [[ "$source_access_mode" == host ]]; then
+    initialize_source_reader
+    compose_options+=(-f "$reader_override")
+  fi
   [[ -n "${API_SOURCE_DIR:-}" ]] || mkdir -p -- sources
   printf '%s\n' 'Validating API deployment configuration...'
   docker compose "${compose_options[@]}" config --quiet
@@ -106,7 +140,7 @@ if [[ "$mode" == api || "$mode" == web ]]; then
   docker compose "${compose_options[@]}" build "${build_services[@]}"
   printf '%s\n' 'Starting services; waiting for Web/core readiness (AI readiness is separate)...'
   update_options=()
-  if [[ -n "$source_directory" && -n "$existing_api" ]]; then
+  if [[ -n "$existing_api" ]]; then
     services=(api)
     [[ "$mode" != web ]] || services+=(web)
     update_options+=(--no-deps)
@@ -121,9 +155,9 @@ if [[ "$mode" == api || "$mode" == web ]]; then
     docker compose "${compose_options[@]}" run --rm -T insight -f json doctor
   fi
   if [[ "$mode" == web ]]; then
-    printf '%s\n' 'Web and API core are ready. Open the loopback Web address shown by Compose (default http://127.0.0.1:3000). See web/README.md for source preparation.'
+    printf '%s\n' 'Web and API core are ready. Open http://127.0.0.1:3000 (or your configured Web port) and enter a local Go file or directory path.'
   else
-    printf '%s\n' 'API core is ready. Use the loopback API address shown by Compose (default http://127.0.0.1:8087). See api/README.md for registration and source binding.'
+    printf '%s\n' 'API core is ready. Use http://127.0.0.1:8087 (or your configured API port); local Go file and directory paths are available.'
   fi
   exit 0
 fi
@@ -137,5 +171,5 @@ printf '%s\n' 'Downloading model weights if needed. The first run can take sever
 docker compose run --rm models
 printf '%s\n' 'Verifying model dimensions and vector service connectivity...'
 docker compose run --rm -T insight -f json doctor
-printf '%s\n' 'Deployment is ready. Run: docker compose run --rm insight scan /workspace'
+printf '%s\n' 'Deployment is ready. Run: bash scripts/insight.sh scan /path/to/project'
 printf '%s\n' 'Then index the source directory and ask a question using the same collection.'

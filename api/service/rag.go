@@ -17,6 +17,7 @@ import (
 	"go-ai-study/api/sourcefiles"
 	"go-ai-study/internal/ai"
 	coreconfig "go-ai-study/internal/config"
+	"go-ai-study/internal/localfiles"
 	"go-ai-study/internal/source"
 )
 
@@ -27,11 +28,13 @@ type RAGClient interface {
 }
 type RAGFactory func(context.Context, ai.FactoryOptions) (RAGClient, error)
 type RAGSettings struct {
-	SourceBindings []sourcefiles.Binding
-	LocalRoot      *sourcefiles.LocalRoot
-	Factory        RAGFactory
-	LoadConfig     func() (*coreconfig.Config, error)
-	JobTimeout     time.Duration
+	SourceAccessMode string
+	SourceReader     localfiles.Provider
+	SourceBindings   []sourcefiles.Binding
+	LocalRoot        *sourcefiles.LocalRoot
+	Factory          RAGFactory
+	LoadConfig       func() (*coreconfig.Config, error)
+	JobTimeout       time.Duration
 }
 type ragOperations struct {
 	factory    RAGFactory
@@ -76,11 +79,11 @@ func (s *Source) SubmitIndex(ctx context.Context, ownerID, projectID uint, targe
 	if _, err := s.repository.OwnedProject(ctx, projectID, ownerID); err != nil {
 		return models.Job{}, err
 	}
-	scope, err := s.workspace.Resolve(ownerID, projectID, target)
+	scope, err := s.workspace.ResolveContext(ctx, ownerID, projectID, target)
 	if err != nil {
 		return models.Job{}, err
 	}
-	if err := scope.Check(); errors.Is(err, fault.ErrUnsafePath) || errors.Is(err, fault.ErrInvalidTarget) || errors.Is(err, fault.ErrExcludedTarget) {
+	if err := scope.CheckContext(ctx); errors.Is(err, fault.ErrUnsafePath) || errors.Is(err, fault.ErrInvalidTarget) || errors.Is(err, fault.ErrExcludedTarget) {
 		return models.Job{}, err
 	}
 	if err := s.rag.reserve(projectID); err != nil {
@@ -94,7 +97,7 @@ func (s *Source) SubmitIndex(ctx context.Context, ownerID, projectID uint, targe
 }
 
 func (s *Source) index(ctx context.Context, job models.Job) (json.RawMessage, error) {
-	scope, err := s.workspace.Resolve(job.OwnerID, job.ProjectID, job.Target)
+	scope, err := s.workspace.ResolveContext(ctx, job.OwnerID, job.ProjectID, job.Target)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +106,7 @@ func (s *Source) index(ctx context.Context, job models.Job) (json.RawMessage, er
 
 func (s *Source) indexScope(ctx context.Context, job models.Job, scope sourcefiles.Scope) (json.RawMessage, error) {
 	var output json.RawMessage
-	err := scope.WithFS(func(files fs.FS) error {
+	err := scope.WithFSContext(ctx, func(files fs.FS) error {
 		return s.rag.run(ctx, job.ProjectID, &ai.FSScanner{FS: files}, true, func(ctx context.Context, client RAGClient) error {
 			summary, err := client.Index(ctx, job.Target)
 			if err != nil {

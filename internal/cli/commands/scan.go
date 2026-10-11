@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"go-ai-study/internal/cli/output"
+	"go-ai-study/internal/localfiles"
 	"go-ai-study/internal/source"
+	"io/fs"
 )
 
 // ScanCommand 扫描命令
@@ -32,7 +34,20 @@ func (c *ScanCommand) Run(ctx context.Context, args []string, formatter output.F
 		return fmt.Errorf("需要指定路径")
 	}
 
-	result, err := source.Scan(ctx, args[0])
+	var result source.ScanResult
+	provider, err := localfiles.FromEnvironment()
+	if err != nil {
+		return err
+	}
+	if provider.URL != "" && localfiles.IsAbsolute(args[0]) {
+		err = provider.WithFS(ctx, args[0], func(files fs.FS, target string) error {
+			var e error
+			result, e = source.ScanFS(ctx, files, target)
+			return e
+		})
+	} else {
+		result, err = source.Scan(ctx, args[0])
+	}
 	if err != nil {
 		return err
 	}

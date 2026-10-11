@@ -61,6 +61,9 @@ func NewSource(ctx context.Context, repository Repository, root string, workers,
 	if err != nil {
 		return nil, err
 	}
+	if len(ragOptions) > 0 && ragOptions[0].SourceAccessMode == "host" {
+		workspace.EnableHostAccess(ragOptions[0].SourceReader)
+	}
 	serviceCtx, cancel := context.WithCancel(ctx)
 	s := &Source{repository: repository, workspace: workspace, ctx: serviceCtx, cancel: cancel}
 	s.rag = newRAGOperations(ragOptions...)
@@ -89,7 +92,7 @@ func (s *Source) Scan(ctx context.Context, ownerID, projectID uint, target strin
 	if _, err := s.repository.OwnedProject(ctx, projectID, ownerID); err != nil {
 		return source.ScanResult{}, err
 	}
-	scope, err := s.workspace.Resolve(ownerID, projectID, target)
+	scope, err := s.workspace.ResolveContext(ctx, ownerID, projectID, target)
 	if err != nil {
 		return source.ScanResult{}, err
 	}
@@ -105,13 +108,13 @@ func (s *Source) SubmitAnalyze(ctx context.Context, ownerID, projectID uint, tar
 	if _, err := s.repository.OwnedProject(ctx, projectID, ownerID); err != nil {
 		return models.Job{}, err
 	}
-	scope, err := s.workspace.Resolve(ownerID, projectID, target)
+	scope, err := s.workspace.ResolveContext(ctx, ownerID, projectID, target)
 	if err != nil {
 		return models.Job{}, err
 	}
 	// Missing/unreadable sources are durable failed work. Unsafe existing
 	// bindings are rejected immediately and checked again by the worker.
-	if err := scope.Check(); errors.Is(err, fault.ErrUnsafePath) || errors.Is(err, fault.ErrInvalidTarget) || errors.Is(err, fault.ErrExcludedTarget) {
+	if err := scope.CheckContext(ctx); errors.Is(err, fault.ErrUnsafePath) || errors.Is(err, fault.ErrInvalidTarget) || errors.Is(err, fault.ErrExcludedTarget) {
 		return models.Job{}, err
 	}
 	return s.engine.SubmitWithExecutor(ctx, models.Job{OwnerID: ownerID, ProjectID: projectID, Kind: models.JobAnalyze, Target: scope.Target()}, s.scopeExecutor(scope))

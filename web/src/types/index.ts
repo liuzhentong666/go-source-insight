@@ -174,7 +174,7 @@ export interface ScanResult {
 }
 export interface ProjectSourceInfo {
   project_id: number;
-  source_mode?: 'local' | 'bound' | 'legacy';
+  source_mode?: 'host' | 'local' | 'bound' | 'legacy';
   binding_configured: boolean;
   absolute_input_allowed: boolean;
   host_root?: string;

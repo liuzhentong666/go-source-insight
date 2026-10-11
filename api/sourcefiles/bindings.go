@@ -1,6 +1,7 @@
 package sourcefiles
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -10,8 +11,11 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
+	"errors"
 	"go-ai-study/api/fault"
+	"go-ai-study/internal/localfiles"
 	"go-ai-study/internal/source"
 )
 
@@ -331,6 +335,24 @@ func caseInsensitiveEntry(entries []fs.DirEntry, name string) (fs.DirEntry, erro
 }
 
 func (w *Workspace) Info(owner, project uint) SourceInfo {
+	if w.host != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		binding, bound := w.binding(owner, project)
+		encoded, _ := json.Marshal(struct {
+			URL     string
+			Local   *Binding
+			Bound   bool
+			Binding Binding
+		}{w.host.URL, w.local, bound, binding})
+		id := sha256.Sum256(encoded)
+		available := w.host.Healthy(ctx)
+		info := SourceInfo{SourceMode: "host", ProjectID: project, BindingConfigured: true, AbsoluteInputAllowed: true, Available: available, ExcludedPaths: []string{}, BindingID: fmt.Sprintf("%x", id)}
+		if !available {
+			info.UnavailableCode = "source_unavailable"
+		}
+		return info
+	}
 	info := SourceInfo{SourceMode: "legacy", ProjectID: project, ExcludedPaths: []string{}}
 	if w.local != nil {
 		scope := w.localWorkspace(owner, project)
@@ -365,4 +387,20 @@ func (w *Workspace) Info(owner, project uint) SourceInfo {
 		info.UnavailableCode, _ = fault.Public(sourceError(err))
 	}
 	return info
+}
+
+func hostError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, localfiles.ErrUnsafe) {
+		return fault.ErrUnsafePath
+	}
+	if errors.Is(err, localfiles.ErrTarget) {
+		return fault.ErrInvalidTarget
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	return sourceError(err)
 }

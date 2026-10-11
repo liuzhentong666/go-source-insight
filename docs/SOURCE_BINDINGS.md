@@ -1,8 +1,14 @@
-# 本地源码目录
+# 本地源码读取
 
-本项目是私人本机工具。部署时选一次源码目录，之后在 Web 新建或选择项目即可直接填写这个目录内的完整目录或 `.go` 文件路径。无需填写所有者/项目 ID，也无需单独执行绑定步骤。源码仍通过 Docker 只读挂载读取，项目保留独立索引和任务。
+本项目是私人本机工具。默认 `SOURCE_ACCESS_MODE=host`，宿主需要与 `go.mod` 兼容的 Go 工具链，Bash 入口还需 `curl`、`openssl` 及常见系统工具 `ps`、`find`、`cksum`；API/Web 部署自动准备宿主源码读取服务；网页输入任意本机可读目录或 `.go` 文件完整路径即可扫描、分析或索引，无需固定根或身份 ID。原生 CLI 直接读取路径；Docker CLI 使用 `scripts/insight.ps1` / `scripts/insight.sh`，例如 `./scripts/insight.ps1 scan 'C:\code\project'`。读取服务默认端口 19100，可用 `SOURCE_READER_PORT` 调整。`SOURCE_READER_URL`、`SOURCE_READER_TOKEN` 仅供服务端使用，不放入 `VITE_` 或静态包。
 
-## 常用入口
+host 模式由本机运行用户权限决定读取能力，检查路径格式、存在性、排除项和链接安全。单 Go 文件只读取该文件；目录以该目录为结果根。当前宿主读取服务单文件上限为 16 MiB，超限会明确读取失败，不计为完整成功。任务目标、报告及来源仍使用相对路径，`ask.file` 仍是索引内相对文件过滤。不同完整路径的 Web 扫描和分析分别关联，不因为相同的 `.` 或文件名串结果。更换输入不自动重建索引；索引始终需要确认替换整项目快照。读取服务不可用时刷新信息不会把旧扫描当作就绪；已有索引仍可问答。
+
+若启动入口发现读取服务源码已变化，会拒绝继续使用旧服务。先完成在途操作，再核对受管进程身份并停止旧读取服务，重跑 deploy 或 insight 入口重新编译启动；不要仅凭状态文件中的 PID 终止进程。
+
+以下目录绑定流程用于显式 `SOURCE_ACCESS_MODE=mapped`，保留已有挂载、项目映射和相对 API 调用的兼容契约。
+
+## mapped 模式目录入口
 
 需要 Docker Compose V2、Linux 容器引擎和与根 `go.mod` 兼容的 Go 工具链。在仓库根目录执行，把示例目录替换为已有源码目录：
 
@@ -38,9 +44,9 @@ bash scripts/deploy.sh --mode web --source-directory '/workspace/project'
 
 原生 API 可使用同一 JSON schema，将 `container_root` 配为实际可读的本机目录，并设置 `SOURCE_BINDINGS_FILE`；Docker 的内部路径不能直接作为原生宿主路径使用。配置来源始终是本地文件，浏览器不提交模型地址或任意挂载配置。
 
-## 网页状态与错误
+## mapped 模式网页状态与错误
 
-`GET /api/v1/projects/:id/source` 返回 `source_mode`（`local`、`bound`、`legacy`）、`binding_configured`、`absolute_input_allowed`、授权显示根 `host_root`、`available`、可选 `unavailable_code`、`excluded_paths` 和 opaque `binding_id`，不显示内部容器路径。仍需项目归属认证。`binding_id` 只表示当前配置身份，帮助网页清掉旧扫描上下文，不代表索引已更新。
+`GET /api/v1/projects/:id/source` 返回 `source_mode`（`host`、`local`、`bound`、`legacy`）、`binding_configured`、`absolute_input_allowed`、授权显示根 `host_root`、`available`、可选 `unavailable_code`、`excluded_paths` 和 opaque `binding_id`，不显示内部容器路径。host 模式可无 `host_root`，`available` 表示宿主读取服务可用，`binding_id` 标识读取配置；网页还将规范化完整输入路径加入任务关联。仍需项目归属认证。`binding_id` 只表示当前配置身份，帮助网页清掉旧扫描上下文，不代表索引已更新。
 
 - 尚未配置本地根或旧项目映射：使用上面的部署目录入口，完整路径才可操作。
 - `invalid_target`（400）：格式不合法或越出当前显示根，核对范围。

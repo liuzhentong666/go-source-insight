@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { absolutePathProblem, canonicalAbsolutePath, jobMatchesScope, relativeScope, scanMatchesInput, sourceBindingProblem, sourceMode, sourceSetupCommands } from '../src/utils/sourceScope.ts';
+import { absolutePathProblem, canonicalAbsolutePath, jobMatchesScope, relativeScope, scanMatchesInput, sourceBindingProblem, sourceMode, sourceScopeBinding, sourceSetupCommands } from '../src/utils/sourceScope.ts';
 import { SourceBindingController } from '../src/utils/sourceBinding.ts';
 import { ProjectJobsController } from '../src/utils/projectJobs.ts';
 import { workspaceApi } from '../src/api/workspace.ts';
@@ -223,4 +223,30 @@ test('outside, unsafe and excluded scope errors are understandable without expos
     const error = new AxiosError('request failed', 'ERR_BAD_REQUEST', {}, null, { data: { code, error: 'safe message' }, status: 403 });
     assert.match(getApiErrorMessage(error), phrase);
   }
+});
+
+
+test('host paths need no configured root and isolate identical relative targets', () => {
+  const info = binding({ source_mode: 'host', host_root: undefined, binding_configured: false });
+  assert.equal(sourceBindingProblem(info, false, null), null);
+  assert.equal(sourceMode(info), 'host');
+  for (const [first, second, relative] of [['C:/other project', 'C:/another project', '.'], ['/a/main.go', '/b/main.go', 'main.go']]) {
+    const scan = { project_id: 5, request_target: first, binding_id: info.binding_id, result: { ...scanned, target_path: relative } };
+    assert.equal(scanMatchesInput(scan, first, info), scan.result);
+    assert.equal(scanMatchesInput(scan, second, info), null);
+    const job = { project_id: 5, target: relative, scope_binding: sourceScopeBinding(first, info) };
+    assert.equal(jobMatchesScope(job, first, info), true);
+    assert.equal(jobMatchesScope(job, second, info), false);
+    assert.equal(jobMatchesScope(job, first, { ...info, project_id: 6 }), false);
+    assert.equal(jobMatchesScope(job, first, { ...info, binding_id: 'new-reader' }), false);
+  }
+  assert.equal(sourceScopeBinding('C:/OTHER PROJECT/', info), sourceScopeBinding('c:/other project', info));
+  const storage = memoryStorage();
+  const jobs = new ProjectJobsController(1, 5, {}, storage);
+  jobs.track({ job_id: 'host-job', project_id: 5, status: 'queued' }, 'analyze', '.', sourceScopeBinding('/first project', info));
+  const restored = new ProjectJobsController(1, 5, {}, storage).getSnapshot().jobs[0];
+  assert.equal(jobMatchesScope(restored, '/first project', info), true);
+  assert.equal(jobMatchesScope(restored, '/second project', info), false);
+  assert.ok(sourceBindingProblem({ ...info, available: false }, false, null));
+  assert.equal(scanMatchesInput({ project_id: 5, request_target: '/a', binding_id: info.binding_id, result: scanned }, '/a', { ...info, available: false }), null);
 });

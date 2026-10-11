@@ -1,8 +1,8 @@
 # GoSource-Insight
 
-GoSource-Insight 提供 Go 源码扫描、静态分析，以及基于 Ollama 和 Milvus 的代码问答。CLI、HTTP API 和 Web 工作台复用核心服务；扫描和静态分析可独立运行。Web 支持本机项目工作台，外部模型供应商 API 仍暂缓。
+GoSource-Insight 是面向个人本机使用的 Go 源码分析助手，提供源码扫描、静态分析，以及基于 Ollama 和 Milvus 的代码问答。CLI 与 Web 支持直接输入本机目录或 Go 文件的完整路径，无需将源码搬入固定目录。CLI、HTTP API 和 Web 工作台复用核心服务；扫描和静态分析不依赖 AI，外部模型供应商 API 仍暂缓。
 
-GoSource-Insight provides Go source scanning, static analysis, and code Q&A powered by Ollama and Milvus. The CLI, HTTP API, and Web workspace share core services; scanning and static analysis can run independently. The Web workspace supports local projects. External model provider APIs remain deferred.
+GoSource-Insight is a Go source analysis assistant for personal, local use, with source scanning, static analysis, and code Q&A powered by Ollama and Milvus. The CLI and Web workspace accept full paths to local directories or Go files, without moving source into a fixed directory. The CLI, HTTP API, and Web workspace share core services; scanning and static analysis do not require AI. External model provider APIs remain deferred.
 
 <a id="写给学习者与-go-开发者"></a>
 
@@ -65,6 +65,58 @@ Windows 可构建为 `go-ai-insight.exe`。全局选项放在命令前；`index`
 
 On Windows, build it as `go-ai-insight.exe`. Global options precede the command; options for `index` and `ask` follow it.
 
+<a id="本机完整路径"></a>
+
+## 使用本机完整路径 / Use full local paths
+
+直接填写要处理的目录或 `.go` 文件完整路径。目录输入扫描该目录；单文件输入只处理该文件，不扩大到父目录。默认本机模式不再要求路径位于预先配置的源码根目录内，也无需管理员绑定目录。
+
+Enter the full path to the directory or `.go` file you want to process. A directory input scans that directory; a file input processes only that file, without expanding to its parent directory. Default local access no longer requires the path to be inside a preconfigured source root, and no administrator-managed binding is needed.
+
+原生 CLI 示例（无需 Docker 或 AI 服务）：
+
+Native CLI examples (no Docker or AI services required):
+
+```powershell
+go run ./cmd scan 'C:\code\project'
+go run ./cmd -f json analyze 'C:\code\project\main.go'
+```
+
+```bash
+go run ./cmd scan '/home/developer/code/project'
+go run ./cmd -f json analyze '/home/developer/code/project/main.go'
+```
+
+Docker CLI 使用下面的入口自动准备本机源码读取进程。需要已构建的 CLI 镜像（`docker compose build insight`）、运行中的 Docker 和兼容 `go.mod` 的本机 Go 工具链；Bash 入口还需要 `curl`、`openssl`、`ps`、`find` 和 `cksum`。扫描和静态分析无需启动 Ollama 或 Milvus。
+
+The Docker CLI entries below automatically prepare the host source reader. They require a built CLI image (`docker compose build insight`), a running Docker engine, and a host Go toolchain compatible with `go.mod`. Bash entries also require `curl`, `openssl`, `ps`, `find`, and `cksum`. Scanning and static analysis do not require Ollama or Milvus to be running.
+
+```powershell
+./scripts/insight.ps1 scan 'C:\code\project'
+./scripts/insight.ps1 -f json analyze 'C:\code\project\main.go'
+```
+
+```bash
+bash scripts/insight.sh scan '/home/developer/code/project'
+bash scripts/insight.sh -f json analyze '/home/developer/code/project/main.go'
+```
+
+Web 用户运行[工作台部署入口](#本机-web-工作台)，注册登录并选择项目后，在“操作范围”填写同样的本机完整路径即可。已有服务再次部署时会保留原发布端口，除非显式设置新的 `API_PORT` / `WEB_PORT`。
+
+Web users can run the [workspace deployment entry](#本机-web-工作台), register, log in, select a project, and enter the same full local path in the scope field. Redeploying existing services preserves their published ports unless new `API_PORT` / `WEB_PORT` values are explicitly supplied.
+
+本机读取进程只读访问 Go 源码，遵守文件权限、链接/重解析点检查和目录排除规则；通过该进程读取的单文件上限为 16 MiB。读取端口默认为 `19100`，可用 `SOURCE_READER_PORT` 调整；访问令牌和运行状态保存在受限、已忽略的 `.runtime/source-reader/`，不进入浏览器配置。重启电脑后通过对应启动入口恢复读取进程；升级提示读取进程代码变化时，先结束源码操作并核实进程身份，再停止该受管进程并重跑入口。详见[本机源码访问说明](docs/SOURCE_BINDINGS.md)。
+
+The host reader accesses Go source read-only and enforces filesystem permissions, link/reparse-point checks, and directory exclusions. Each file read through it is limited to 16 MiB. Its port defaults to `19100` and can be changed with `SOURCE_READER_PORT`. Access tokens and runtime state stay in the restricted, ignored `.runtime/source-reader/` directory and never enter browser configuration. After rebooting, rerun the relevant entry to restore the reader. If an upgrade reports changed reader code, finish source operations, verify the process identity, stop that managed process, and rerun the entry. See [local source access](docs/SOURCE_BINDINGS.md).
+
+原生 API 和部署脚本默认使用 `host` 模式；直接手工启动基础 API Compose 配置默认使用 `mapped` 模式。显式设置 `SOURCE_ACCESS_MODE=mapped` 可继续使用旧目录挂载及项目映射；相对 API 调用也保留旧语义。`insight` 包装入口中的绝对路径始终指向宿主机，原有 `docker compose run --rm insight ... /workspace` 命令仍读取容器挂载。
+
+The native API and deployment scripts default to `host` mode; directly starting the base API Compose configuration defaults to `mapped` mode. Explicit `SOURCE_ACCESS_MODE=mapped` preserves earlier directory mounts and project mappings, and relative API calls retain their earlier meaning. Absolute paths passed to the `insight` wrapper always refer to the host. Existing `docker compose run --rm insight ... /workspace` commands still read the container mount.
+
+扫描或切换路径不会自动更新问答索引。建立单文件或子目录索引仍会替换所选 collection / 项目的整个索引快照；不同代码库应使用不同 collection 或 Web 项目。
+
+Scanning or changing paths does not automatically update the Q&A index. Indexing a single file or subdirectory still replaces the entire index snapshot for the selected collection or project. Use separate collections or Web projects for different codebases.
+
 <a id="一键准备完整问答环境"></a>
 
 ## 一键准备完整问答环境 / Set up the complete code Q&A environment
@@ -108,17 +160,17 @@ docker compose run --rm insight index --collection example_project /workspace
 docker compose run --rm insight ask --collection example_project "源码扫描和静态分析如何衔接？"
 ```
 
-`insight` 是运行后退出的 CLI 服务，默认命令为 `help`。`/workspace` 默认只读挂载当前项目。分析其他目录时，仅通过本地环境变量设置通用挂载入口；例如：
+`insight` 是运行后退出的 CLI 服务，默认命令为 `help`。上述 `/workspace` 示例沿用旧的容器挂载方式，默认只读挂载当前项目。分析其他本机目录时，推荐使用[完整路径入口](#本机完整路径)；如果需要继续手工管理挂载，也可通过 `SOURCE_DIR` 设置：
 
-`insight` is a CLI service that exits after running its command; its default command is `help`. `/workspace` mounts the current project read-only by default. To analyze another directory, set the general mount entry through a local environment variable, for example:
+`insight` is a CLI service that exits after running its command; its default command is `help`. The `/workspace` examples above retain the earlier container-mount workflow, which mounts the current project read-only by default. For other local directories, use the [full-path entries](#本机完整路径). To continue managing mounts manually, set `SOURCE_DIR`:
 
 ```powershell
-$env:SOURCE_DIR = './sample-project'
+$env:SOURCE_DIR = 'C:\code\sample-project'
 docker compose run --rm insight index --collection sample_project /workspace
 ```
 
 ```bash
-SOURCE_DIR=./sample-project docker compose run --rm insight index --collection sample_project /workspace
+SOURCE_DIR=/home/developer/code/sample-project docker compose run --rm insight index --collection sample_project /workspace
 ```
 
 相对挂载路径以 Compose 文件所在目录为基准。之后的扫描或索引命令使用同样的 `SOURCE_DIR`。问答读取向量库，不需要重新扫描目录。
@@ -171,9 +223,9 @@ bash scripts/deploy.sh --mode web
 bash scripts/deploy.sh --mode web --with-ai
 ```
 
-默认访问 `http://127.0.0.1:3000`，`WEB_PORT` 可覆盖。部署复用 API 凭据和数据库，等待 PostgreSQL/API/Web 健康；核心就绪不表示 AI 在线。这是私人本机工具，常用启动命令为 `./scripts/deploy.ps1 -Mode web -SourceDirectory 'C:\code\project'` 或 `bash scripts/deploy.sh --mode web --source-directory '/workspace/project'`。脚本验证并只读挂载源码目录；注册登录后新建/选择项目即可在网页填写该根内完整目录或 `.go` 文件路径，无需管理员、所有者/项目 ID 或独立绑定步骤。详见 [本地源码目录](docs/SOURCE_BINDINGS.md)。后端只读取授权根内内容，结果仍为相对路径。索引任务需要已有 AI 服务及模型；索引子目录也会替换整项目快照。网页不提供上传或 Git 导入。
+默认访问 `http://127.0.0.1:3000`，`WEB_PORT` 可覆盖。执行 `./scripts/deploy.ps1 -Mode web` 或 `bash scripts/deploy.sh --mode web`，入口自动准备宿主源码读取服务并启动 API/Web。宿主需要与 `go.mod` 兼容的 Go 工具链；Bash 入口另需 `curl`、`openssl` 及常见系统工具 `ps`、`find`、`cksum`。已有 API 时仅更新必要 API/Web 服务并保留数据库与模型。默认 host 模式下，注册登录并选择项目后可填写任意本机可读目录或 `.go` 文件完整路径，无需预先选根、填写所有者/项目 ID 或手动绑定。读取权限取决于本机运行用户；服务端检查路径、链接及排除规则，结果仍用相对路径。显式 `SOURCE_ACCESS_MODE=mapped` 保留 `-SourceDirectory` / `--source-directory` 只读挂载与旧项目映射，详见 [本地源码读取](docs/SOURCE_BINDINGS.md)。核心健康不表示 AI 在线；索引需要已有模型和向量服务，即使选择单文件也替换整项目快照。网页不提供上传或 Git 导入。
 
-The default address is `http://127.0.0.1:3000`; override it with `WEB_PORT`. Deployment reuses the API credentials and database and waits for PostgreSQL/API/Web to become healthy. Core readiness does not mean AI is online. This is a private local tool. Typical startup commands are `./scripts/deploy.ps1 -Mode web -SourceDirectory 'C:\code\project'` or `bash scripts/deploy.sh --mode web --source-directory '/workspace/project'`. The script validates and mounts the source directory read-only. After registering, logging in, and creating or selecting a project, enter a full directory or `.go` file path within that root in the browser. No administrator, owner/project IDs, or separate binding step is needed. See [local source directories](docs/SOURCE_BINDINGS.md). The backend reads only content within the authorized root, and results still use relative paths. Indexing requires existing AI services and models; indexing a subdirectory also replaces the whole project snapshot. The Web workspace does not provide uploads or Git imports.
+The default address is `http://127.0.0.1:3000`; override it with `WEB_PORT`. Run `./scripts/deploy.ps1 -Mode web` or `bash scripts/deploy.sh --mode web`; the entry automatically prepares the host source reader and starts API/Web. The host needs a Go toolchain compatible with `go.mod`; Bash entries also require `curl`, `openssl` and standard system tools `ps`, `find`, `cksum`. Existing API deployments update only the necessary API/Web services and preserve the database and models. In default host mode, register, log in, select a project, then enter any complete local directory or `.go` file path readable by the local process. No fixed root, owner/project IDs or manual binding is required. The server checks paths, links and exclusions; results remain relative. Explicit `SOURCE_ACCESS_MODE=mapped` preserves `-SourceDirectory` / `--source-directory` read-only mounts and old project mappings; see [local source access](docs/SOURCE_BINDINGS.md). Core health does not mean AI is online. Indexing requires existing models and vector services, and even a single-file index replaces the entire project snapshot. Web does not provide uploads or Git imports.
 
 正式 Web 使用非 root Nginx 同源代理 `/api/*`，支持工作台路由直接刷新，服务密钥不进入静态包。CLI/API 不要求 Web 构建依赖。工作台完整流程见 [Web 说明](web/README.md)，环境配置、代理期限与安全隔离测试见 [部署说明](docs/WEB_DEPLOYMENT.md)。
 
@@ -197,17 +249,17 @@ bash scripts/deploy.sh --mode api
 bash scripts/deploy.sh --mode api --with-ai
 ```
 
-默认 API 模式只启动 PostgreSQL 和 API，等待核心就绪后成功退出；AI 离线不影响扫描/分析。可选 AI 模式复用已有 Ollama/Milvus 和缓存模型，不下载模型。首次生成的强服务凭据存于忽略的 `.runtime/api.env`，重复启动复用；源码位于忽略的 `sources/` 并只读挂载。也支持同时通过环境注入 `API_DB_PASSWORD`、`API_JWT_SECRET`。现有凭据文件无效时明确失败，不重置数据库密码。
+首次默认 API 部署准备本机源码读取进程，启动 PostgreSQL 和 API，等待核心就绪后成功退出；已有 API 时仅更新 API，保留数据库和模型服务。AI 离线不影响扫描/分析。可选 AI 模式启动或复用 Ollama/Milvus，并检查缓存模型，不下载模型。首次生成的强服务凭据存于忽略的 `.runtime/api.env`，重复启动复用；也支持同时通过环境注入 `API_DB_PASSWORD`、`API_JWT_SECRET`。现有凭据文件无效时明确失败，不重置数据库密码。默认 host 模式直接读取输入的本机路径；忽略的 `sources/` 只用于兼容旧相对调用和挂载流程，不要求将源码复制进去。
 
-By default, API mode starts only PostgreSQL and the API, then exits successfully after the core services are ready. Scanning and analysis work while AI is offline. Optional AI mode reuses existing Ollama/Milvus services and cached models without downloading models. Strong service credentials generated on the first run are stored in the ignored `.runtime/api.env` and reused on later starts. Source code resides in the ignored `sources/` directory and is mounted read-only. You can also supply both `API_DB_PASSWORD` and `API_JWT_SECRET` through the environment. An invalid existing credentials file causes an explicit failure; the database password is not reset.
+On the first default API deployment, the entry prepares the host source reader, starts PostgreSQL and the API, and exits successfully after core readiness. With an existing API, it updates only the API and preserves database and model services. Scanning and analysis work while AI is offline. Optional AI mode starts or reuses Ollama/Milvus and checks cached models without downloading them. Strong service credentials generated on the first run are stored in the ignored `.runtime/api.env` and reused on later starts. You can also supply both `API_DB_PASSWORD` and `API_JWT_SECRET` through the environment. An invalid existing credentials file causes an explicit failure; the database password is not reset. Default host mode reads the supplied local path directly. The ignored `sources/` directory remains for compatible relative calls and mount workflows; copying source into it is not required.
 
 API 默认仅发布到 `http://127.0.0.1:8087`，依赖端口不公开。API 镜像非 root 运行；PostgreSQL 使用独立持久卷。基础 `docker-compose.yml` 不要求 API 密钥；仅 API 模式显式合并 `docker-compose.api.yml`。每个数据库/索引空间只运行一个 API 实例。
 
 By default, the API is published only at `http://127.0.0.1:8087`; dependency ports are not exposed. The API image runs as a non-root user, and PostgreSQL uses a separate persistent volume. The base `docker-compose.yml` does not require API secrets; only API mode explicitly merges `docker-compose.api.yml`. Run only one API instance per database/index space.
 
-完整注册→登录→创建项目→准备源码→扫描→分析/任务查询→索引→问答→取消流程见 [API 使用说明](api/README.md)。没有预置账户；部署时通过 `-SourceDirectory` / `--source-directory` 选择本地根，各项目可输入该根内完整路径；旧相对 API 调用与项目映射继续兼容。绑定变化不自动更新已有索引，需要用户明确确认重新建立索引。接口与中断/发布不确定的语义见 [API 契约](api/CONTRACT.md)。
+完整注册→登录→创建项目→准备源码→扫描→分析/任务查询→索引→问答→取消流程见 [API 使用说明](api/README.md)。没有预置账户；默认 host 模式可直接输入任意本机可读完整目录/Go 文件路径；显式 mapped 模式保留旧根配置，相对 API 调用与项目映射继续兼容。绑定变化不自动更新已有索引，需要用户明确确认重新建立索引。接口与中断/发布不确定的语义见 [API 契约](api/CONTRACT.md)。
 
-See the [API guide](api/README.md) for the complete flow: register → log in → create a project → prepare source code → scan → analyze/query tasks → index → ask → cancel. There are no preset accounts. Select a local root at deployment with `-SourceDirectory` / `--source-directory`; projects can accept full paths within that root. Legacy relative API calls and project mappings remain compatible. Binding changes do not automatically update existing indexes; rebuilding the index requires explicit user confirmation. See the [API contract](api/CONTRACT.md) for interface semantics, interruptions, and uncertain publication outcomes.
+See the [API guide](api/README.md) for the complete flow: register → log in → create a project → prepare source code → scan → analyze/query tasks → index → ask → cancel. There are no preset accounts. Default host mode accepts any complete readable local directory/Go file path; explicit mapped mode retains configured roots. Legacy relative API calls and project mappings remain compatible. Binding changes do not automatically update existing indexes; rebuilding the index requires explicit user confirmation. See the [API contract](api/CONTRACT.md) for interface semantics, interruptions, and uncertain publication outcomes.
 
 <a id="索引和问答语义"></a>
 
@@ -307,9 +359,9 @@ Text is the default output format. `-f json` produces structured results:
 
 The example omits fields such as the file list. `result` is an object and does not require a second parsing step. Logs go to stderr by default, and reports go to stdout. `-o REPORT` writes the report to the specified file. Successful commands return 0; failures in input, configuration, or service execution return a nonzero status and an error message.
 
-`scan` 包含文件总数、生产/测试文件数、行数和跳过目录；`analyze` 默认分析生产 Go 文件，不分析 `_test.go`。扫描过程跳过符号链接，入口本身为符号链接时返回错误；忽略依赖与产物目录 `.git`、`vendor`、`node_modules`、`dist`、`build`，以及 IDE / agent 工具目录 `.idea`、`.vscode`、`.hermes`、`.qoder`、`.codex`。未被忽略的源码或目录读取失败时，扫描、分析和索引均返回错误，不将缺失数据当成完整结果。代码分块和 Bug/安全问题的来源行号使用文件中的物理行号，不受 `//line` 指令影响。
+`scan` 包含文件总数、生产/测试文件数、行数和跳过目录；`analyze` 默认分析生产 Go 文件，不分析 `_test.go`。扫描过程跳过符号链接，入口本身为符号链接时返回错误；忽略依赖与产物目录 `.git`、`vendor`、`node_modules`、`dist`、`build`、`bin`、`.runtime`，以及 IDE / agent 工具目录 `.idea`、`.vscode`、`.hermes`、`.qoder`、`.codex`。直接指定被排除目录或其中的文件也会失败。未被忽略的源码或目录读取失败时，扫描、分析和索引均返回错误，不将缺失数据当成完整结果。代码分块和 Bug/安全问题的来源行号使用文件中的物理行号，不受 `//line` 指令影响。
 
-`scan` reports the total file count, production/test file counts, line counts, and skipped directories. `analyze` analyzes production Go files by default and excludes `_test.go`. Scanning skips symbolic links and returns an error if the entry point itself is a symbolic link. It ignores dependency and output directories `.git`, `vendor`, `node_modules`, `dist`, and `build`, plus IDE / agent tool directories `.idea`, `.vscode`, `.hermes`, `.qoder`, and `.codex`. If a source file or directory that is not ignored cannot be read, scanning, analysis, and indexing all return an error rather than treating missing data as a complete result. Source line numbers for code chunks and bug/security issues are physical line numbers in the file, unaffected by `//line` directives.
+`scan` reports the total file count, production/test file counts, line counts, and skipped directories. `analyze` analyzes production Go files by default and excludes `_test.go`. Scanning skips symbolic links and returns an error if the entry point itself is a symbolic link. It ignores dependency and output directories `.git`, `vendor`, `node_modules`, `dist`, `build`, `bin`, and `.runtime`, plus IDE / agent tool directories `.idea`, `.vscode`, `.hermes`, `.qoder`, and `.codex`. Directly targeting an excluded directory or a file inside it also fails. If a source file or directory that is not ignored cannot be read, scanning, analysis, and indexing all return an error rather than treating missing data as a complete result. Source line numbers for code chunks and bug/security issues are physical line numbers in the file, unaffected by `//line` directives.
 
 <a id="核心架构与开发边界"></a>
 
@@ -317,8 +369,10 @@ The example omits fields such as the file list. `result` is an object and does n
 
 ```text
 cmd/                  统一 CLI 入口 / Unified CLI entry point
+cmd/source-reader/    本机只读源码服务入口 / Host read-only source service entry
 internal/cli/         命令调度与报告输出 / Command dispatch and reports
 internal/source/      共享源码发现能力 / Shared source discovery
+internal/localfiles/  本机目标访问与读取客户端 / Host target access and reader client
 internal/tools/       AST 静态规则与工具管理 / AST rules and tool management
 internal/analysis/    CLI/API 共享静态分析聚合 / Shared CLI/API static analysis aggregation
 internal/ai/          源码切块、索引、检索、Ollama 问答 / Source chunking, indexing, retrieval, Ollama Q&A

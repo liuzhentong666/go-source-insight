@@ -13,6 +13,7 @@ import (
 
 	"go-ai-study/api/fault"
 	core "go-ai-study/internal/analysis"
+	"go-ai-study/internal/localfiles"
 	"go-ai-study/internal/source"
 )
 
@@ -21,7 +22,11 @@ type Workspace struct {
 	analyzer *core.StaticAnalyzer
 	bindings map[bindingKey]Binding
 	local    *Binding
+	host     *localfiles.Provider
 }
+
+// EnableHostAccess leaves relative project bindings unchanged.
+func (w *Workspace) EnableHostAccess(provider localfiles.Provider) { w.host = &provider }
 
 func New(root string) (*Workspace, error) {
 	return NewWithBindings(root, nil)

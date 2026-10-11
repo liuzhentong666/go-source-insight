@@ -2,7 +2,7 @@
 
 ## 启动与配置
 
-私人本机常用入口是在仓库根目录执行 `./scripts/deploy.ps1 -Mode web -SourceDirectory 'C:\code\project'` 或 `bash scripts/deploy.sh --mode web --source-directory '/workspace/project'`。脚本校验目录、保存受限配置并完成只读挂载；无需管理员或手填所有者/项目 ID。未传目录参数时，默认构建 API 与 Web，启动 PostgreSQL、API、Web，等待健康成功后才退出；任一步失败返回非零状态。已有模型缓存时添加 `-WithAI` / `--with-ai`，沿用 Ollama/Milvus 命名卷，执行缓存模型及向量连接检查，不自动下载模型。原 CLI 和 `api` 模式保持独立。
+私人本机常用入口为 `./scripts/deploy.ps1 -Mode web` 或 `bash scripts/deploy.sh --mode web`。默认 host 模式要求宿主有与 `go.mod` 兼容的 Go 工具链，Bash 还需 `curl`、`openssl` 及常见系统工具 `ps`、`find`、`cksum`；入口自动准备宿主读取服务，网页可直接输入任意本机可读目录/Go 文件完整路径，无需预选源码根。显式 `SOURCE_ACCESS_MODE=mapped` 时，`-SourceDirectory` / `--source-directory` 保留旧只读挂载流程。首次部署构建 API/Web、启动 PostgreSQL 并等待健康；已有同项目 API 时仅通过 `--no-deps` 更新 API/Web，保留运行中的数据库和模型；核心健康不证明读取服务或 AI 的具体操作成功。已有模型缓存时添加 `-WithAI` / `--with-ai`，不下载缺失模型。
 
 脚本默认复用已忽略的 `.runtime/api.env`。自选凭据文件使用 `-ApiEnvFile PATH` / `--env-file PATH`，文件必须与已存在的 PostgreSQL 卷凭据一致。首次生成凭据，重跑保留文件；缺失、弱或不匹配的既有配置应先核对，禁止通过删除卷或凭据文件解决。环境注入同时提供 `API_DB_PASSWORD`、`API_JWT_SECRET` 时可以不创建文件。不要打印完整 Compose 配置或容器环境。
 
@@ -50,7 +50,7 @@ Nginx 原样转发 `/api/*`，不会把 API 错误替换为网页。静态路径
 
 默认代理等待 330 秒，是模型默认期限 300 秒加 30 秒余量；连接上游最多等待 10 秒。前端普通请求 60 秒、问答 350 秒且可中止。后端 HTTP 写入期限固定 300 秒，配置更长 AI 期限仍可能被该限制截断；如需长期 HTTP 问答，需同时协调后端、代理和客户端，单独提高 `WEB_PROXY_TIMEOUT_SECONDS` 不足以支持。分析/索引是异步任务，单次提交与查询无需等待全部任务执行。
 
-目录入口使各项目的 Web 完整路径操作使用同一本地根，旧相对 API 调用与项目映射继续兼容。已有同项目 API 时自动复用正在挂载的受限配置目录，仅更新 API/Web，保留数据库与模型服务；相同待应用配置可重试，不覆盖其他待应用配置。读取规则与排除运行产物见 [本地源码目录](SOURCE_BINDINGS.md)。换根不会自动索引，需用户明确建立索引。单数据库/索引空间只运行一个 API 实例。索引子目录会替换整项目范围；历史快照会占用磁盘且尚无自动清理。任务中断和发布不确定时先核对索引再重试。Web 不包含上传、Git 导入、外部模型供应商、流式问答或持久会话历史。
+host 模式通过宿主读取服务访问完整路径，结果保持相对路径；mapped 模式保留本地根挂载，旧相对 API 调用与项目映射兼容。已有同项目 API 时仅更新必要 API/Web 服务并保留数据库、模型和索引；API 更新可能中断在途操作。路径变化不会自动索引，单文件或子目录索引都会替换整项目快照。单数据库/索引空间只运行一个 API 实例。历史快照尚无自动清理。任务中断和发布不确定时先核对索引再重试。Web 不包含上传、Git 导入、外部模型供应商、流式问答或持久会话历史。
 
 ## 安全隔离验证
 
@@ -74,3 +74,5 @@ bash scripts/deploy_test.sh
 docker build -f web/Dockerfile -t go-source-insight-web:local web
 ./scripts/web_proxy_test.ps1
 ```
+
+手工直接使用基础 Compose 时默认为 mapped；deploy 入口默认为 host 并通过本地 override 启用宿主读取服务。显式 `SOURCE_ACCESS_MODE=mapped` 跳过读取服务准备，沿用原目录挂载契约。

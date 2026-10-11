@@ -1,3 +1,5 @@
+> 本机完整路径：原生 CLI 可直接扫描/分析任意本机可读目录或 Go 文件。Docker CLI 使用 `./scripts/insight.ps1 scan 'C:\code\project'` / `bash scripts/insight.sh scan '/workspace/project'`，将 `scan` 换成 `analyze` 可分析；入口自动准备宿主读取服务，无需固定源码根。索引与问答仍需要现有 Ollama/Milvus 服务及匹配模型。读取结果和问答文件过滤仍使用相对路径。
+
 # GoSource-Insight CLI
 
 统一入口为 `go run ./cmd` 或构建后的 `go-ai-insight`。核心命令为 `scan`、`analyze`、`index`、`ask`；Docker 部署步骤见 [README.md](README.md)。

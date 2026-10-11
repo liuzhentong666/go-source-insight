@@ -38,17 +38,27 @@ export function relativeScopesEqual(left: string, right: string, hostRoot: strin
 }
 export interface ScopedScan { project_id: number; request_target: string; binding_id: string; result: ScanResult }
 export function scanMatchesInput(scan: ScopedScan | null, input: string, info: ProjectSourceInfo | null): ScanResult | null {
-  if (!scan || !info?.host_root || scan.project_id !== info.project_id || !info.available || !info.binding_id || scan.binding_id !== info.binding_id) return null;
+  if (!scan || !info || scan.project_id !== info.project_id || !info.available || !info.binding_id || scan.binding_id !== info.binding_id) return null;
+  if (sourceMode(info) === 'host') return canonicalAbsolutePath(input) !== null && canonicalAbsolutePath(input) === canonicalAbsolutePath(scan.request_target) ? scan.result : null;
+  if (!info.host_root) return null;
   const expected = relativeScope(input, info.host_root);
   if (expected === null || canonicalAbsolutePath(input) !== canonicalAbsolutePath(scan.request_target)) return null;
   return relativeScopesEqual(expected, scan.result.target_path, info.host_root) ? scan.result : null;
 }
+export function sourceScopeBinding(input: string, info: ProjectSourceInfo): string | undefined {
+  if (!info.binding_id) return undefined;
+  if (sourceMode(info) !== 'host') return info.binding_id;
+  const path = canonicalAbsolutePath(input);
+  return path === null ? undefined : JSON.stringify([info.binding_id, path]);
+}
 export function jobMatchesScope(job: Job, input: string, info: ProjectSourceInfo | null): boolean {
-  if (!info?.host_root || job.project_id !== info.project_id || !info.binding_id || job.scope_binding !== info.binding_id) return false;
+  if (!info || job.project_id !== info.project_id || !info.binding_id || job.scope_binding !== sourceScopeBinding(input, info)) return false;
+  if (sourceMode(info) === 'host') return canonicalAbsolutePath(input) !== null;
+  if (!info.host_root) return false;
   const relative = relativeScope(input, info.host_root);
   return relative !== null && relativeScopesEqual(relative, job.target, info.host_root);
 }
-export function sourceMode(info: ProjectSourceInfo | null): 'local' | 'bound' | 'legacy' {
+export function sourceMode(info: ProjectSourceInfo | null): 'host' | 'local' | 'bound' | 'legacy' {
   return info?.source_mode || (info?.binding_configured ? 'bound' : 'legacy');
 }
 export const sourceSetupCommands = {
@@ -59,6 +69,11 @@ export function sourceBindingProblem(info: ProjectSourceInfo | null, loading: bo
   if (loading) return '正在读取本地源码目录，请稍候。';
   if (error) return error;
   if (!info) return '尚未读取本地源码目录，请刷新目录信息。';
+  if (sourceMode(info) === 'host') {
+    if (!info.available) return '本机源码读取服务未启动或无法连接。请重新运行本地启动入口，再刷新目录信息。';
+    if (!info.absolute_input_allowed || !info.binding_id) return '本机源码读取信息不完整，请刷新目录信息或更新本地程序。';
+    return null;
+  }
   if (!info.binding_configured || !info.absolute_input_allowed || !info.host_root) return '尚未选择本地源码目录。启动时添加 -SourceDirectory（PowerShell）或 --source-directory（Bash），再刷新目录信息。';
   if (!info.available) return '当前本地源码目录不可读取或未挂载。请检查目录是否存在、是否可读取，再刷新目录信息。';
   if (!info.binding_id) return '本地源码目录信息不完整，请刷新目录信息或更新本地程序。';

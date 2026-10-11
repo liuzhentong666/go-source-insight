@@ -5,7 +5,7 @@ import "errors"
 
 var (
 	ErrNotFound           = errors.New("resource not found")
-	ErrInvalidTarget      = errors.New("target must be a valid path within the project's configured source root")
+	ErrInvalidTarget      = errors.New("target must be a valid directory or Go source file path")
 	ErrExcludedTarget     = errors.New("target is excluded from project source operations")
 	ErrUnsafePath         = errors.New("source path contains a link or escapes its project")
 	ErrSourceUnavailable  = errors.New("project source could not be read completely")

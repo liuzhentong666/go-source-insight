@@ -11,12 +11,15 @@ resources on the project source/job endpoints return `404`. The existing project
 metadata and analysis-history endpoints retain their legacy `403` response for
 foreign projects.
 
-This is a private local tool. The deployment entry accepts one source directory:
-`deploy.ps1 -Mode web -SourceDirectory <absolute-directory>` or
-`deploy.sh --mode web --source-directory <absolute-directory>` (API mode also
-supports it). It validates and read-only mounts that directory; no owner/project
-IDs or separate binding command are needed for this workflow. The browser cannot
-supply mount configuration or model/service endpoints.
+This is a private local tool. `SOURCE_ACCESS_MODE` defaults to `host`.
+Direct use of the base Compose defaults to mapped; deploy entries default to
+host, and the insight CLI wrapper explicitly enables the host reader.
+API/Web host deployment automatically prepares a host source reader; the browser can
+submit any complete local directory or `.go` file path readable by that process,
+without a fixed `SOURCE_ROOT` or prior binding. `SOURCE_READER_URL` and
+`SOURCE_READER_TOKEN` are server-only configuration. The browser cannot supply
+reader/model endpoints or mount configuration. Explicit `mapped` mode retains
+the directory-mount workflow below.
 
 `SOURCE_BINDINGS_FILE` accepts strict JSON with optional `local_root` and legacy
 `bindings`. A local root has absolute non-volume-root `host_root`, native absolute
@@ -29,7 +32,11 @@ Project creation accepts only `name` and `description`.
 
 Source operations accept an optional JSON object such as `{"target":"pkg"}`.
 An empty body or omitted target selects `.`. Relative API targets retain the
-legacy per-project mapping or `SOURCE_ROOT/<owner-id>/<project-id>`. With a local
+legacy per-project mapping or `SOURCE_ROOT/<owner-id>/<project-id>`. In host mode, absolute directory inputs use that directory as the result root
+and `target_path` is `.`; single `.go` inputs read only that file, and the result
+target is its basename. Existence, permissions, exclusions and unsafe paths are
+checked by the host reader. Switching absolute inputs never automatically
+rebuilds an index. In mapped mode, with a local
 root, absolute directory or `.go` targets from every owned project use that root;
 otherwise the project's legacy explicit mapping applies. Missing/unreadable local
 roots and out-of-root targets fail rather than falling back to another source.
@@ -41,9 +48,13 @@ continues to require an indexed relative path. Existing indexes remain queryable
 when source directories are unavailable.
 
 `GET /api/v1/projects/:id/source` verifies ownership and returns `project_id`,
-`source_mode` (`local`, `bound`, `legacy`), `binding_configured`,
+`source_mode` (`host`, `local`, `bound`, `legacy`), `binding_configured`,
 `absolute_input_allowed`, configured display `host_root`, `available`, optional
-`unavailable_code`, `excluded_paths`, and opaque `binding_id`. A configured local
+`unavailable_code`, `excluded_paths`, and opaque `binding_id`. In host mode `host_root` is optional, `absolute_input_allowed` is true,
+`available` reflects reader availability, and `binding_id` identifies the host
+access configuration. Web associates each scan/task with that identity and the
+normalized full input path, so different directories or same-named files do not
+share results. A configured local
 root is the effective Web root for all projects. The identity hashes the effective
 root/exclusion configuration and helps Web invalidate stale source context; it
 does not grant access or imply that an index was rebuilt. Legacy unconfigured

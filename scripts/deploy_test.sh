@@ -5,15 +5,21 @@ cd -- "$project_directory"
 bash -n scripts/deploy.sh
 test_directory="$(mktemp -d "${TMPDIR:-/tmp}/insight-deploy-tests.XXXXXX")"
 export API_SOURCE_DIR="$test_directory" DEPLOY_TEST_LOG="$test_directory/calls" DEPLOY_TEST_FAIL=''
-unset API_DB_PASSWORD API_JWT_SECRET
+unset API_DB_PASSWORD API_JWT_SECRET SOURCE_ACCESS_MODE
 docker() {
   printf '%s\n' "$*" >> "$DEPLOY_TEST_LOG"
   if [[ -n "$DEPLOY_TEST_FAIL" && " $* " == *" $DEPLOY_TEST_FAIL "* ]]; then return 17; fi
 }
 export -f docker
+initialize_source_reader() { reader_override="$API_SOURCE_DIR/reader.compose.json"; printf '%s\n' '{"services":{"api":{"environment":{"SOURCE_ACCESS_MODE":"host"}}}}' > "$reader_override"; }
+export -f initialize_source_reader
 env_file="$test_directory/credentials/api.env"
 bash scripts/deploy.sh --mode api --env-file "$env_file" >/dev/null
 initial_hash="$(sha256sum "$env_file")"
+grep -q 'reader.compose.json' "$DEPLOY_TEST_LOG"
+: > "$DEPLOY_TEST_LOG"
+SOURCE_ACCESS_MODE=mapped bash scripts/deploy.sh --mode api --env-file "$env_file" >/dev/null
+if grep -q 'reader.compose.json' "$DEPLOY_TEST_LOG"; then printf '%s\n' 'Mapped deployment started the host reader.' >&2; exit 1; fi
 bash scripts/deploy.sh --mode api --env-file "$env_file" >/dev/null
 [[ "$(sha256sum "$env_file")" == "$initial_hash" ]] || { printf '%s\n' 'Credentials changed on repeated deployment.' >&2; exit 1; }
 grep -q 'up -d --wait --wait-timeout 300 postgres api' "$DEPLOY_TEST_LOG"
